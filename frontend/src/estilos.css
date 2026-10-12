@@ -653,6 +653,9 @@ button.rl { cursor: pointer; } button.rl:hover { background: var(--sup-2); }
 .mapa-dica .mapa-dica-cor i.tom-critico { background: var(--critico); } .mapa-dica .mapa-dica-cor i.tom-atencao { background: var(--atencao-barra); }
 .mapa-dica .mapa-dica-cor i.tom-acento { background: var(--acento); } .mapa-dica .mapa-dica-cor i.tom-ok { background: var(--ok-barra); } .mapa-dica .mapa-dica-cor i.tom-neutro { background: var(--linha-forte); }
 .mapa-dica .mapa-dica-erro { margin-top: 4px; color: var(--critico); font-weight: 500; display: block; }
+.sem-coord { margin-top: var(--e-3); }
+.sem-coord summary { cursor: pointer; color: var(--acento); font-size: 13px; }
+.sem-coord .tabela-bloco { margin-top: var(--e-2); }
 .mapa-svg { width: 100%; height: auto; display: block; }
 .mapa-ponto { stroke: var(--sup); stroke-width: 1.5; cursor: pointer; }
 .mapa-ponto:hover { stroke: var(--tinta); stroke-width: 2; }

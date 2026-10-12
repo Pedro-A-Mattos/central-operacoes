@@ -52,7 +52,7 @@ const E = {
   menuAberto: false,
   exemplo: false,
   historico: [] as RegistroImportacao[],
-  mapa: { cidade: "", cor: "situacao" as "situacao" | "espera" | "rota", modo: "mapa" as "mapa" | "esquema" },
+  mapa: { cidade: "", entregador: "", cor: "situacao" as "situacao" | "espera" | "rota", modo: "mapa" as "mapa" | "esquema" },
   overrides: { por_cidade: {}, cidades_ignoradas: [] } as Overrides,
   estudo: {
     arquivo: null as ValidacaoArquivo | null, lendo: false, erro: null as ProblemaArquivo | null,

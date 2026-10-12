@@ -278,10 +278,15 @@ function mapaCanvas(pts: PontoMapa[], corDe: (r: RegAtual) => { chave: string; t
 function telaMapa(): HTMLElement {
   const a = E.analise!; const m = E.mapa;
   const cidades = unicos(a.atual.map((r) => r.dados["Consignee City"] as string));
-  const doRecorte = m.cidade ? a.atual.filter((r) => r.dados["Consignee City"] === m.cidade) : a.atual;
+  const entregadores = unicos(a.atual.map((r) => entregadorDe(r.dados)));
+  const doRecorte = a.atual.filter((r) =>
+    (!m.cidade || r.dados["Consignee City"] === m.cidade) &&
+    (!m.entregador || entregadorDe(r.dados) === m.entregador));
   const pts: PontoMapa[] = doRecorte.map((r) => ({ r, lat: coordenada(r.dados["Consignee Latitude"]), lon: coordenada(r.dados["Consignee Longitude"]) }))
     .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && p.lat !== 0 && p.lon !== 0 && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180);
-  const semCoord = doRecorte.length - pts.length;
+  const comCoord = new Set(pts.map((p) => awbDe(p.r.dados)));
+  const semCoordRegs = doRecorte.filter((r) => !comCoord.has(awbDe(r.dados)));
+  const semCoord = semCoordRegs.length;
   const corDe = (r: RegAtual): { chave: string; tom: string } => {
     if (m.cor === "espera") return { chave: r.faixa_backlog || "Sem data", tom: r.faixa_backlog ? TOM_FAIXA[r.faixa_backlog] : "neutro" };
     if (m.cor === "rota") { const f = faixaRota(r) || "Entregue"; return { chave: f, tom: TOM_ROTA[f] || "ok" }; }
@@ -306,11 +311,14 @@ function telaMapa(): HTMLElement {
 
   return h("div", { class: "tela" },
     cabecalho({ area: "Monitorar", titulo: "Mapa", ajuda: "mapa", pergunta: "Onde estão as pendências e onde se concentram os problemas?",
-      resposta: h("p", null, h("strong", null, plural(pts.length - foraDoQuadro, "encomenda no mapa", "encomendas no mapa")), m.cidade ? ` em ${m.cidade}` : "",
+      resposta: h("p", null, h("strong", null, plural(pts.length - foraDoQuadro, "encomenda no mapa", "encomendas no mapa")),
+        m.entregador ? ` de ${m.entregador}` : "", m.cidade ? ` em ${m.cidade}` : "",
         semCoord ? ` · ${fmtN(semCoord)} sem coordenadas no relatório` : "", foraDoQuadro ? ` · ${fmtN(foraDoQuadro)} com coordenadas muito distantes das demais (provável erro de endereço)` : "", ".") }),
     h("section", { class: "filtros" }, h("div", { class: "filtros-controles" },
       h("label", { class: "sel-ordem" }, h("span", null, "Cidade"), h("select", { id: "mp-cid", on: { change: (e: Event) => atualizar(() => { m.cidade = (e.target as HTMLSelectElement).value; }) } },
         h("option", { value: "" }, "Todas"), cidades.map((c) => h("option", { value: c, selected: m.cidade === c }, c)))),
+      h("label", { class: "sel-ordem" }, h("span", null, "Entregador"), h("select", { id: "mp-ent", on: { change: (e: Event) => atualizar(() => { m.entregador = (e.target as HTMLSelectElement).value; }) } },
+        h("option", { value: "" }, "Todos"), entregadores.map((c) => h("option", { value: c, selected: m.entregador === c }, c)))),
       h("label", { class: "sel-ordem" }, h("span", null, "Colorir por"), h("select", { id: "mp-cor", on: { change: (e: Event) => atualizar(() => { m.cor = (e.target as HTMLSelectElement).value as typeof m.cor; }) } },
         h("option", { value: "situacao", selected: m.cor === "situacao" }, "Situação (piso e exceções)"),
         h("option", { value: "espera", selected: m.cor === "espera" }, "Há quanto tempo aguardam"),
@@ -323,7 +331,19 @@ function telaMapa(): HTMLElement {
       h("p", { class: "nota" }, usarReal
         ? "Mapa de fundo do OpenStreetMap; as posições vêm das coordenadas do relatório. Para navegar pelo teclado, use a lista em "
         : "Sem internet para o mapa de fundo: mostrando as posições de forma esquemática. Para navegar pelo teclado, use a lista em ",
-        h("button", { type: "button", class: "link", on: { click: () => navegar("pendencias", { de: "mapa", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, cidades: m.cidade ? [m.cidade] : [] }; } }) } }, "Pendências"), ".")));
+        h("button", { type: "button", class: "link", on: { click: () => navegar("pendencias", { de: "mapa", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, cidades: m.cidade ? [m.cidade] : [] }; } }) } }, "Pendências"), "."),
+      semCoord ? h("details", { class: "sem-coord" },
+        h("summary", null, `${plural(semCoord, "encomenda sem coordenada", "encomendas sem coordenada")} neste recorte (não aparecem no mapa)`),
+        tabela({ id: "mp-semcoord", titulo: "Sem coordenada no relatório", linhas: semCoordRegs, chave: (r) => awbDe(r.dados), porPagina: 20, onAbrir: (r) => abrirAwb(awbDe(r.dados)),
+          colunas: [
+            { id: "awb", rotulo: "Waybill No", valor: (r) => awbDe(r.dados), classe: "mono" },
+            { id: "ent", rotulo: "Entregador", valor: (r) => entregadorDe(r.dados) },
+            { id: "local", rotulo: "Cidade · bairro", valor: (r) => `${r.dados["Consignee City"] ?? ""} ${r.dados["Consignee Area"] ?? ""}` },
+            { id: "cep", rotulo: "CEP", valor: (r) => String(r.dados["Consignee Zip Code"] ?? ""), classe: "mono" },
+            { id: "status", rotulo: "Status", valor: (r) => String(r.dados["Last Scan Status"] ?? "") },
+            { id: "piso", rotulo: "Piso", valor: (r) => (r.erro_piso ? r.erro_piso.tipo : ""), render: (r) => r.erro_piso ? h("span", { class: "duas" }, chipErro(r.erro_piso.tipo), h("small", null, r.erro_piso.esperados.length ? "deveria: " + r.erro_piso.esperados.join(" ou ") : "")) : h("span", { class: "nulo" }, "—") },
+          ],
+          exportar: botaoExportar("mapa_sem_coordenada.xlsx", () => ({ linhas: semCoordRegs.map((r) => ({ ...r.dados, erro_piso: r.erro_piso ? r.erro_piso.tipo : "", entregadores_esperados: r.erro_piso ? r.erro_piso.esperados.join(", ") : "" })), colunas: [...COLUNAS_CONTRATO, "erro_piso", "entregadores_esperados"] })) })) : null));
 }
 
 // ---------- mapa esquemático (SVG, sem internet) — fallback do mapa real ----------
