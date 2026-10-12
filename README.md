@@ -70,6 +70,13 @@ guardado. É o modo sem custo de infraestrutura. Os dados reais e os artefatos
 de build (`frontend/dist/`, `backend/dados_exemplo/`, `backend/dados/`) ficam
 fora do repositório.
 
+No modo efêmero, as **regras de piso** (`frontend/public/regras_piso.json`) são
+publicadas junto do site e lidas pela aplicação ao abrir (GitHub → aplicação,
+**somente leitura**). As edições de regra feitas na interface valem apenas para
+a sessão e somem ao recarregar; a aplicação nunca escreve de volta no
+repositório. Para mudar as regras "oficiais", edite o arquivo versionado e dê
+push — o site republica automaticamente.
+
 ## Telas
 
 | Área | Tela | Responde |

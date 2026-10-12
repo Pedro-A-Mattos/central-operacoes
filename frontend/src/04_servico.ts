@@ -89,8 +89,10 @@ const OV_VAZIO = (): Overrides => ({ por_cidade: {}, cidades_ignoradas: [] });
 
 // Modo efêmero (build --publico): nada é gravado em lugar nenhum. Tudo vive só
 // nesta aba e some ao fechar/recarregar. Sem localStorage, sem servidor, sem custo.
-function repoMemoria(): Repositorio {
-  const mem: { j: Record<string, Justificativa>; r: Overrides | null; h: RegistroImportacao[] } = { j: {}, r: null, h: [] };
+// `regrasBase` (opcional) são as regras de piso versionadas no GitHub, lidas ao abrir;
+// a aplicação só lê — nunca escreve de volta no repositório.
+function repoMemoria(regrasBase?: Overrides | null): Repositorio {
+  const mem: { j: Record<string, Justificativa>; r: Overrides | null; h: RegistroImportacao[] } = { j: {}, r: regrasBase || null, h: [] };
   return {
     tipo: "memoria",
     async lerJust() { return mem.j; },
@@ -100,6 +102,20 @@ function repoMemoria(): Repositorio {
     async lerHistorico() { return mem.h; },
     async gravarImportacao(r) { mem.h = inserirNoHistorico(mem.h, r); return mem.h; },
   };
+}
+
+// Lê as regras de piso publicadas junto do site (mesmo origem, sem CORS).
+// Só leitura: GitHub -> aplicação. Se o arquivo não existir ou vier inválido, ignora.
+async function lerRegrasPublicadas(): Promise<Overrides | null> {
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 2500);
+    const r = await fetch("./regras_piso.json", { signal: ctl.signal, cache: "no-store" }); clearTimeout(t);
+    if (!r.ok) return null;
+    const v = await r.json();
+    if (!v || typeof v !== "object") return null;
+    return { por_cidade: (v.por_cidade && typeof v.por_cidade === "object") ? v.por_cidade : {},
+             cidades_ignoradas: Array.isArray(v.cidades_ignoradas) ? v.cidades_ignoradas : [] };
+  } catch { return null; }
 }
 
 function repoNavegador(): Repositorio {
@@ -234,7 +250,7 @@ class ServicoLocal implements Servico {
 }
 
 async function criarServico(): Promise<Servico> {
-  if (EFEMERO) return new ServicoLocal(repoMemoria());
+  if (EFEMERO) return new ServicoLocal(repoMemoria(await lerRegrasPublicadas()));
   if (location.protocol.startsWith("http")) {
     try {
       const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 1500);
