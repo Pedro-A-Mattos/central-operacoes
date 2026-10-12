@@ -1,0 +1,362 @@
+"""Orquestração do pipeline (equivalente ao topo do app.py do MVP) e
+serialização no contrato JSON consumido pela interface.
+
+Ordem preservada (doc 04): descarregado (opcional) -> não recebido (opcional) ->
+FM (sempre) -> fora da jurisdição (sempre) -> comparar -> derivar regras + overrides -> validar piso.
+"""
+from __future__ import annotations
+
+import math
+import re
+import unicodedata
+from dataclasses import dataclass, field
+from datetime import datetime
+
+import pandas as pd
+
+from . import comparador as cmp
+from . import excecoes as exc
+from . import metricas as met
+from . import regras as rg
+
+VERSAO_CONTRATO = 2
+
+# Campos transmitidos para a interface (nomes originais da iMile).
+COLUNAS = [
+    "Waybill No", "Reference No", "Last Scan Status", "Last Problem Type",
+    "Last Problem Reason", "Last Problem Date", "Consignee City", "Consignee Area",
+    "Consignee Address", "Consignee Zip Code", "Delivery Associate", "Delivery Count",
+    "Delivery Time", "Arrival Time", "Waybill Hold Time", "Estimated Delivery Time",
+    "Dispatch Station", "Consignee Route Code", "Sign Date", "Consignee Latitude", "Consignee Longitude",
+]
+COLUNAS_USADAS_PELA_LOGICA = [
+    ("Waybill No", True, "Código da encomenda (AWB) — chave da comparação"),
+    ("Consignee City", False, "Cidade — sem ela a encomenda fica fora da jurisdição"),
+    ("Delivery Associate", False, "Entregador — usado na conferência de piso e no desempenho"),
+    ("Consignee Area", False, "Bairro — conferência de piso em cidades com muitos entregadores"),
+    ("Last Scan Status", False, "Status — mudanças de status e filtros de descarregado e não recebido"),
+    ("Last Problem Type", False, "Tipo do problema — força maior, exceções, devoluções"),
+    ("Last Problem Reason", False, "Motivo do problema — indício de devolução e extravio"),
+    ("Delivery Count", False, "Tentativas de entrega — regra de devolução (3 ou mais)"),
+    ("Arrival Time", False, "Chegada ao galpão — faixas de tempo e filtro de dias"),
+    ("Delivery Time", False, "Saída para entrega — tempo em rota"),
+    ("Sign Date", False, "Data de assinatura — entrega confirmada"),
+]
+
+
+@dataclass
+class Parametros:
+    ignorar_descarregado: bool = True  # padrão ligado desde 2026-10-11 (pedido do usuário)
+    ignorar_nao_recebido: bool = True  # padrão ligado desde 2026-10-12 (pedido do usuário)
+    limiar_ruido: int = rg.LIMIAR_RUIDO
+    cidades_ignoradas: list[str] = field(default_factory=list)
+    overrides: dict = field(default_factory=lambda: {"por_cidade": {}, "cidades_ignoradas": []})
+    referencia_backlog: pd.Timestamp | None = None
+
+
+def _valor(v):
+    if v is None:
+        return None
+    if isinstance(v, (pd.Timestamp, datetime)):
+        return None if pd.isna(v) else v.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(v, bool):
+        return str(v)
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return None if math.isnan(v) else (int(v) if v.is_integer() else v)
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if hasattr(v, "item"):
+        return v.item()
+    s = str(v)
+    return s if s.strip() != "" else None
+
+
+def _registros(df: pd.DataFrame) -> list[dict]:
+    cols = [c for c in COLUNAS if c in df.columns]
+    return [{c: _valor(r[c]) for c in cols} for _, r in df[cols].iterrows()]
+
+
+# ---------- Passo 2 da importação: validação de um arquivo ----------
+
+def validar_arquivo(df_bruto: pd.DataFrame, nome: str) -> dict:
+    problemas, avisos = [], []
+    colunas = []
+    for col, obrig, papel in COLUNAS_USADAS_PELA_LOGICA:
+        presente = col in df_bruto.columns
+        colunas.append({"coluna": col, "obrigatoria": obrig, "presente": presente, "papel": papel})
+        if not presente and obrig:
+            problemas.append({
+                "titulo": "Falta a coluna do código da encomenda",
+                "significado": "Sem a coluna 'Waybill No' não é possível comparar os relatórios.",
+                "acao": "Exporte novamente o relatório Dispatch completo, sem remover colunas."})
+        elif not presente:
+            avisos.append(f"Coluna '{col}' não encontrada: {papel.split(' — ')[1] if ' — ' in papel else papel} ficará indisponível.")
+    info = {"nome": nome, "linhas": int(len(df_bruto)), "colunas_total": int(len(df_bruto.columns)),
+            "colunas": colunas, "problemas": problemas, "avisos": avisos,
+            "sem_awb": 0, "duplicadas": 0, "validas": 0, "chegada_min": None, "chegada_max": None, "previa": []}
+    if problemas:
+        return info
+    awb = cmp.normalizar_awb(df_bruto[cmp.AWB_COL])
+    info["sem_awb"] = int((awb.isna() | (awb == "")).sum())
+    norm = cmp.normalizar_relatorio(df_bruto)
+    info["validas"] = int(len(norm))
+    info["duplicadas"] = int(len(df_bruto) - info["sem_awb"] - len(norm))
+    if info["sem_awb"]:
+        avisos.append(f"{info['sem_awb']} linha(s) sem código da encomenda serão descartadas.")
+    if info["duplicadas"]:
+        avisos.append(f"{info['duplicadas']} código(s) repetido(s): será mantida a última ocorrência de cada um.")
+    if cmp.CHEGADA_COL in norm.columns:
+        ch = pd.to_datetime(norm[cmp.CHEGADA_COL], errors="coerce").dropna()
+        if len(ch):
+            info["chegada_min"] = ch.min().strftime("%Y-%m-%d %H:%M:%S")
+            info["chegada_max"] = ch.max().strftime("%Y-%m-%d %H:%M:%S")
+    info["previa"] = _registros(norm.head(5))
+    ref, origem = met.referencia_do_relatorio(nome, norm)
+    info["referencia_sugerida"] = None if ref is None else ref.strftime("%Y-%m-%d %H:%M:%S")
+    info["referencia_origem"] = origem
+    info["qualidade"] = qualidade(norm)
+    return info
+
+
+def _canon(v) -> str:
+    s = unicodedata.normalize("NFKD", str(v)).encode("ascii", "ignore").decode()
+    return re.sub(r"\s+", " ", s.lower()).strip()
+
+
+def _grafias(df: pd.DataFrame, col: str, grupo: str | None) -> list[list[str]]:
+    if col not in df.columns:
+        return []
+    mapa: dict[str, set[str]] = {}
+    for _, r in df.iterrows():
+        v = r[col]
+        if v is None or pd.isna(v) or str(v).strip() == "":
+            continue
+        g = str(r[grupo]).strip() if grupo and grupo in df.columns and not pd.isna(r[grupo]) else ""
+        mapa.setdefault(g + "|" + _canon(v), set()).add(str(v))
+    return [sorted(v) for k, v in sorted(mapa.items()) if len(v) > 1]
+
+
+def qualidade(norm: pd.DataFrame) -> list[dict]:
+    """Checagens de qualidade exibidas na importação. Só informam: nada é corrigido."""
+    out = []
+    def add(codigo, titulo, n, impacto, exemplos=None, tom="atencao"):
+        if n:
+            out.append({"codigo": codigo, "titulo": titulo, "n": int(n), "impacto": impacto,
+                        "exemplos": exemplos or [], "tom": tom})
+    g = _grafias(norm, rg.AREA_COL, cmp.CIDADE_COL)
+    add("grafia_bairro", "bairros escritos de formas diferentes", len(g),
+        "Na conferência por bairro, cada grafia vira um bairro separado com regra própria.",
+        [" / ".join(x) for x in g[:3]])
+    g = _grafias(norm, cmp.CIDADE_COL, None)
+    add("grafia_cidade", "cidades escritas de formas diferentes", len(g),
+        "Cada grafia vira uma cidade separada nos indicadores e na conferência.", [" / ".join(x) for x in g[:3]])
+    g = _grafias(norm, rg.ENTREGADOR_COL, None)
+    add("grafia_entregador", "entregadores com nomes escritos de formas diferentes", len(g),
+        "O desempenho de uma mesma pessoa fica dividido.", [" / ".join(x) for x in g[:3]])
+    tem = lambda c: norm[c].notna() & (norm[c].astype("string").str.strip() != "") if c in norm.columns else pd.Series(False, index=norm.index)
+    com_cidade = tem(cmp.CIDADE_COL)
+    add("sem_cidade", "linhas sem cidade de destino", int((~com_cidade).sum()),
+        "Ficam em “Fora da jurisdição” e não entram em nenhum indicador.", tom="info")
+    if cmp.CHEGADA_COL in norm.columns:
+        add("sem_chegada", "linhas sem data de chegada válida",
+            int(pd.to_datetime(norm[cmp.CHEGADA_COL], errors="coerce").isna().sum()),
+            "Ficam fora das faixas de tempo de espera e do filtro por dia.")
+    add("sem_entregador", "linhas com cidade e sem entregador", int((com_cidade & ~tem(rg.ENTREGADOR_COL)).sum()),
+        "Aparecem como “Sem entregador” na conferência de piso.")
+    add("sem_bairro", "linhas com cidade e sem bairro", int((com_cidade & ~tem(rg.AREA_COL)).sum()),
+        "Nas cidades conferidas por bairro, são conferidas pela regra da cidade.", tom="info")
+    add("entregue_confirmada", "encomendas já constam como entregues", int(met.entrega_confirmada(norm).sum()),
+        "Se este for o relatório atualizado, elas seguem contadas como pendentes (regra RN-003).", tom="info")
+    return out
+
+
+def indicio_ordem(base: pd.DataFrame, atual: pd.DataFrame) -> dict:
+    """OP-07 (evolução, apenas alerta): compara a sobreposição dos códigos.
+    Num par correto, quase tudo do atual já existia na base e muitas saem.
+    Nunca troca a ordem sozinho."""
+    b, a = set(base[cmp.AWB_COL]), set(atual[cmp.AWB_COL])
+    so_atual, so_base = len(a - b), len(b - a)
+    suspeito = so_atual > so_base and len(a) > len(b)
+    return {"so_no_atual": so_atual, "so_na_base": so_base, "em_ambos": len(a & b),
+            "linhas_base": len(b), "linhas_atual": len(a), "possivel_inversao": bool(suspeito)}
+
+
+# ---------- Análise completa ----------
+
+def _palavra_devolucao(texto: str) -> str | None:
+    t = (texto or "").lower()
+    for p in cmp.PALAVRAS_DEVOLUCAO:
+        if p in t:
+            return p
+    return None
+
+
+def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
+             justificativas: dict | None = None, nomes: tuple[str, str] = ("base", "atual")) -> dict:
+    base = cmp.normalizar_relatorio(base_bruto)
+    ult = cmp.normalizar_relatorio(atual_bruto)
+    if p.referencia_backlog is not None:
+        ref, ref_origem = p.referencia_backlog, "definida"
+    else:
+        ref, ref_origem = met.referencia_do_relatorio(nomes[1], ult)
+        if ref is None:
+            ref, ref_origem = pd.Timestamp.now().floor("s"), "relogio"
+
+    b1 = cmp.aplicar_filtro_descarregado(base, p.ignorar_descarregado)
+    u1 = cmp.aplicar_filtro_descarregado(ult, p.ignorar_descarregado)
+    b1b = cmp.aplicar_filtro_nao_recebido(b1, p.ignorar_nao_recebido)
+    u1b = cmp.aplicar_filtro_nao_recebido(u1, p.ignorar_nao_recebido)
+    b2, u2 = cmp.remover_fm(b1b), cmp.remover_fm(u1b)
+    base_f, base_fora = cmp.separar_fora_jurisdicao(b2)
+    ult_f, ult_fora = cmp.separar_fora_jurisdicao(u2)
+
+    res = cmp.comparar(base_f, ult_f)
+    overrides = p.overrides or {"por_cidade": {}, "cidades_ignoradas": []}
+    regras = rg.aplicar_overrides(rg.derivar_regras(base_f, p.limiar_ruido), overrides)
+    ignoradas = list(dict.fromkeys(list(overrides.get("cidades_ignoradas", [])) + list(p.cidades_ignoradas)))
+    erros = rg.validar_piso(res.pendentes, regras, ignoradas)
+
+    pend = res.pendentes.copy()
+    classe = met.classificar(pend)
+    dias = met.calcular_backlog_dias(pend, ref)
+    faixa = met.faixa_backlog_por_linha(pend, ref)
+    em_rota = met.minutos_em_rota(pend, ref)
+    confirmada = met.entrega_confirmada(pend)
+    base_ids = set(base_f[cmp.AWB_COL])
+    ent_base = dict(zip(base_f[cmp.AWB_COL], base_f.get(rg.ENTREGADOR_COL, pd.Series(dtype=object))))
+    mudou = {r[cmp.AWB_COL]: (r["status_base"], r["status_ultima"]) for _, r in res.mudou_status.iterrows()}
+    status_base = dict(zip(base_f[cmp.AWB_COL], base_f.get(cmp.STATUS_COL, pd.Series(dtype=object))))
+    erro_por_awb = {r[cmp.AWB_COL]: r for _, r in erros.iterrows()}
+    dev_ids = set(exc.pecas_para_devolucao(pend)[cmp.AWB_COL])
+    ext_ids = set(exc.extravios(pend)[cmp.AWB_COL])
+    ins_ids = set(exc.insucessos(pend)[cmp.AWB_COL])
+    rev_ids = set(exc.tentativas_a_revisar(pend)[cmp.AWB_COL])
+
+    atual = []
+    for i, reg in enumerate(_registros(pend)):
+        awb = reg[cmp.AWB_COL]
+        d = {"dados": reg}
+        d["nova"] = awb not in base_ids
+        d["classe_operacional"] = classe.iloc[i]
+        d["backlog_dias"] = None if pd.isna(dias.iloc[i]) else round(float(dias.iloc[i]), 2)
+        d["faixa_backlog"] = None if pd.isna(faixa.iloc[i]) else faixa.iloc[i]
+        d["em_rota_min"] = None if pd.isna(em_rota.iloc[i]) else int(em_rota.iloc[i])
+        d["entrega_confirmada"] = bool(confirmada.iloc[i])
+        d["status_base"] = _valor(status_base.get(awb)) if awb in base_ids else None
+        d["mudou_status"] = awb in mudou
+        d["entregador_base"] = _valor(ent_base.get(awb)) if awb in base_ids else None
+        e = erro_por_awb.get(awb)
+        if e is not None:
+            cidade = reg.get(cmp.CIDADE_COL)
+            bairro = reg.get(rg.AREA_COL)
+            _, escopo = regras.entregadores_validos(cidade, bairro) if cidade else (set(), "cidade")
+            d["erro_piso"] = {"tipo": e["tipo_erro"], "detalhe": e["detalhe"],
+                              "esperados": [x for x in e["entregadores_esperados"].split(", ") if x],
+                              "escopo": escopo,
+                              "origem_regra": regras.origem_cidade.get(cidade, "sem regra")}
+        else:
+            d["erro_piso"] = None
+        tipos = []
+        if awb in dev_ids: tipos.append("devolucao")
+        if awb in ext_ids: tipos.append("extravio")
+        if awb in ins_ids: tipos.append("insucesso")
+        if awb in rev_ids: tipos.append("revisar_tentativas")
+        d["excecoes"] = tipos
+        d["motivo_devolucao"] = exc.motivo_de_devolucao(f"{reg.get(cmp.PROBLEMA_COL) or ''} {reg.get(cmp.MOTIVO_COL) or ''}")
+        atual.append(d)
+
+    sairam = []
+    for cat, df in (("provavel_entrega", res.saiu_entregue), ("possivel_devolucao", res.saiu_devolucao)):
+        for reg in _registros(df):
+            txt = f"{reg.get(cmp.PROBLEMA_COL) or ''} {reg.get(cmp.MOTIVO_COL) or ''}"
+            sairam.append({"dados": reg, "categoria": cat, "indicio": _palavra_devolucao(txt)})
+
+    regras_out = {
+        "por_cidade": {c: {"entregadores": sorted(v), "origem": regras.origem_cidade.get(c, "derivada"),
+                           "urbana": c in regras.cidades_urbanas} for c, v in sorted(regras.por_cidade.items())},
+        "por_bairro": [{"cidade": c, "bairro": b, "entregadores": sorted(v)}
+                       for (c, b), v in sorted(regras.por_bairro.items())],
+        "cidades_ignoradas": ignoradas,
+    }
+
+    return {
+        "versao": VERSAO_CONTRATO,
+        "motor": "python",
+        "gerado_em": datetime.now().isoformat(timespec="seconds"),
+        "referencia_backlog": ref.strftime("%Y-%m-%d %H:%M:%S"),
+        "referencia_origem": ref_origem,
+        "arquivos": {"base": nomes[0], "atual": nomes[1]},
+        "parametros": {"ignorar_descarregado": p.ignorar_descarregado,
+                       "ignorar_nao_recebido": p.ignorar_nao_recebido, "limiar_ruido": p.limiar_ruido,
+                       "min_entregadores_urbano": rg.MIN_ENTREGADORES_URBANO,
+                       "limite_tentativas": exc.LIMITE_AUSENTES, "cidades_ignoradas": ignoradas,
+                       "motivos_devolucao": list(exc.MOTIVOS_DEVOLUCAO)},
+        "etapas": {
+            "base_lidas": len(base), "atual_lidas": len(ult),
+            "descarregado_base": len(base) - len(b1), "descarregado_atual": len(ult) - len(u1),
+            "nao_recebido_base": len(b1) - len(b1b), "nao_recebido_atual": len(u1) - len(u1b),
+            "fm_base": len(b1b) - len(b2), "fm_atual": len(u1b) - len(u2),
+            "fora_base": len(base_fora), "fora_atual": len(ult_fora),
+        },
+        "removidas": {
+            "fm": sorted(set(b1b[cmp.AWB_COL]) - set(b2[cmp.AWB_COL]) | set(u1b[cmp.AWB_COL]) - set(u2[cmp.AWB_COL])),
+            "descarregado": sorted(set(base[cmp.AWB_COL]) - set(b1[cmp.AWB_COL]) | set(ult[cmp.AWB_COL]) - set(u1[cmp.AWB_COL])),
+            "nao_recebido": sorted(set(b1[cmp.AWB_COL]) - set(b1b[cmp.AWB_COL]) | set(u1[cmp.AWB_COL]) - set(u1b[cmp.AWB_COL])),
+        },
+        "resumo": res.resumo,
+        "entregues_confirmadas": int(confirmada.sum()),
+        "ordem": indicio_ordem(base, ult),
+        "atual": atual,
+        "sairam": sairam,
+        "mudou_status": [{"awb": k, "status_base": _valor(v[0]), "status_atual": _valor(v[1])} for k, v in mudou.items()],
+        "fora": {"base": _registros(base_fora), "atual": _registros(ult_fora)},
+        "regras": regras_out,
+        "dias_chegada": cmp.dias_chegada_disponiveis(ult_f),
+        "dias_chegada_entregadores": sorted(set(cmp.dias_chegada_disponiveis(base_f)) | set(cmp.dias_chegada_disponiveis(ult_f))),
+        "desempenho": desempenho(base_f, ult_f, []),
+        "justificativas": justificativas or {},
+    }
+
+
+def desempenho(base_f: pd.DataFrame, ult_f: pd.DataFrame, dias: list[str]) -> dict:
+    """Aba Entregadores: o filtro de dias recalcula a comparação (RN-011)."""
+    b = cmp.filtrar_por_dias_chegada(base_f, dias)
+    u = cmp.filtrar_por_dias_chegada(ult_f, dias)
+    r = cmp.comparar(b, u)
+    ids = set(r.saiu_entregue[cmp.AWB_COL])
+    tab = met.desempenho_entregadores(b, u, ids)
+    linhas = met.linhas_classificadas_entregador(b, u, ids)
+    classes = {}
+    for _, row in linhas.iterrows():
+        classes.setdefault(row["entregador"], {}).setdefault(row["classe"], []).append(row[cmp.AWB_COL])
+    return {"dias": list(dias or []), "linhas": tab.to_dict(orient="records"), "awbs": classes}
+
+
+def simular_regras(base_f: pd.DataFrame, ult_f: pd.DataFrame, atual: dict, novo: dict) -> dict:
+    """Impacto de uma mudança de regra ANTES de salvar: compara a conferência de
+    piso com as regras atuais e com as propostas. `atual`/`novo`:
+    {"overrides": {...}, "limiar_ruido": int, "cidades_ignoradas": [...]}"""
+    def erros(cfg):
+        ov = cfg.get("overrides") or {"por_cidade": {}, "cidades_ignoradas": []}
+        regras = rg.aplicar_overrides(rg.derivar_regras(base_f, int(cfg.get("limiar_ruido", rg.LIMIAR_RUIDO))), ov)
+        ign = list(dict.fromkeys(list(ov.get("cidades_ignoradas", [])) + list(cfg.get("cidades_ignoradas", []))))
+        e = rg.validar_piso(ult_f, regras, ign)
+        return {r[cmp.AWB_COL]: r["tipo_erro"] for _, r in e.iterrows()}
+    antes, depois = erros(atual), erros(novo)
+    dados = {r[cmp.AWB_COL]: r for _, r in ult_f.iterrows()}
+    mudancas = []
+    for awb in sorted(set(antes) | set(depois)):
+        if antes.get(awb) != depois.get(awb):
+            r = dados[awb]
+            mudancas.append({"awb": awb, "cidade": _valor(r.get(cmp.CIDADE_COL)), "entregador": _valor(r.get(rg.ENTREGADOR_COL)),
+                             "antes": antes.get(awb), "depois": depois.get(awb)})
+    return {"erros_antes": len(antes), "erros_depois": len(depois),
+            "passam_a_erro": sum(1 for m in mudancas if m["antes"] is None),
+            "deixam_de_ser_erro": sum(1 for m in mudancas if m["depois"] is None),
+            "mudam_tipo": sum(1 for m in mudancas if m["antes"] and m["depois"]),
+            "mudancas": mudancas}
