@@ -191,8 +191,8 @@ function telaImportar(): HTMLElement {
     h("div", { class: "conf-opcoes" },
       alternar({ id: "opt-desc", ajuda: "descarregado", rotulo: "Ignorar encomendas com status “descarregado”", valor: E.params.ignorar_descarregado, onMudar: (v) => atualizar(() => { E.params.ignorar_descarregado = v; }),
         dica: "Remove essas encomendas de toda a análise, nos dois relatórios. Desligado por padrão, como no MVP." }),
-      alternar({ id: "opt-nrec", ajuda: "nao_recebido", rotulo: "Ignorar encomendas com status “não recebido”", valor: E.params.ignorar_nao_recebido, onMudar: (v) => atualizar(() => { E.params.ignorar_nao_recebido = v; }),
-        dica: "Remove essas encomendas de toda a análise, nos dois relatórios. Ligado por padrão." }),
+      alternar({ id: "opt-nrec", ajuda: "nao_recebido", rotulo: "Ignorar encomendas “não recebido”", valor: E.params.ignorar_nao_recebido, onMudar: (v) => atualizar(() => { E.params.ignorar_nao_recebido = v; }),
+        dica: "Remove de toda a análise as encomendas com “não recebido” no status ou no tipo de problema, nos dois relatórios. Ligado por padrão." }),
       h("p", { class: "nota" }, "Sempre aplicado: encomendas de força maior (FM) são removidas e as sem cidade ficam separadas em “Fora da jurisdição”.")),
     imp.processando
       ? h("ol", { class: "etapas", "aria-live": "polite" }, imp.etapas.map((et) => h("li", { class: et.feito ? "feito" : "andando" }, et.feito ? icone("ok", "ic ic-sm") : h("span", { class: "giro", "aria-hidden": "true" }), et.texto)))

@@ -184,7 +184,7 @@ def test_ca015_filtro_dias_local():
 def test_pipeline_contrato():
     b = pd.read_excel(DADOS / "tabela_base.xlsx")
     u = pd.read_excel(DADOS / "ultima_tabela.xlsx")
-    a = analisar(b, u, Parametros(ignorar_descarregado=False, referencia_backlog=pd.Timestamp("2026-10-10 18:00")))
+    a = analisar(b, u, Parametros(ignorar_descarregado=False, ignorar_nao_recebido=False, referencia_backlog=pd.Timestamp("2026-10-10 18:00")))
     assert a["resumo"]["pendentes"] == 413 and a["etapas"]["fm_atual"] == 119
     assert sum(1 for x in a["atual"] if x["erro_piso"]) == 31
     assert not a["ordem"]["possivel_inversao"]
@@ -225,28 +225,34 @@ def test_descarregado_ligado_por_padrao():
     u = pd.read_excel(DADOS / "ultima_tabela.xlsx")
     a = analisar(b, u, Parametros())
     assert a["parametros"]["ignorar_descarregado"] and a["etapas"]["descarregado_atual"] == 3
-    assert a["resumo"]["pendentes"] == 410
+    # Padrão: descarregado (3) e não recebido (3, no tipo de problema) ligados.
+    # Sem filtros seriam 413; 413 - 3 - 3 = 407.
+    assert a["etapas"]["nao_recebido_atual"] == 3
+    assert a["resumo"]["pendentes"] == 407
 
 
 def test_nao_recebido_ligado_por_padrao_e_remove_status():
-    # RN-012: filtro ligado por padrão, removendo "não recebido" (com/sem acento) do Last Scan Status.
+    # RN-012: filtro ligado por padrão; remove "não recebido" (com/sem acento)
+    # quando aparece no Last Scan Status OU no Last Problem Type.
     assert Parametros().ignorar_nao_recebido is True
     df = pd.DataFrame({
-        "Waybill No": ["1", "2", "3", "4"],
-        "Last Scan Status": ["Em rota de entrega", "não recebido", "Nao Recebido", "descarregado"],
+        "Waybill No": ["1", "2", "3", "4", "5", "6"],
+        "Last Scan Status": ["Em rota de entrega", "não recebido", "Nao Recebido", "Em rota de entrega", "descarregado", "Em rota de entrega"],
+        "Last Problem Type": [None, None, None, "Não recebido", None, "Reprogramação"],
     })
     df = cmp.normalizar_relatorio(df)
     ligado = cmp.aplicar_filtro_nao_recebido(df, True)
-    assert list(ligado["Waybill No"]) == ["1", "4"]  # remove "2" e "3"
+    # remove por status ("2","3") e por tipo de problema ("4"); mantém "1","5","6"
+    assert list(ligado["Waybill No"]) == ["1", "5", "6"]
     desligado = cmp.aplicar_filtro_nao_recebido(df, False)
-    assert len(desligado) == 4
-    # dados de exemplo não têm esse status: o filtro padrão não muda os números
+    assert len(desligado) == 6
+    # nos dados de exemplo: 3 no status não; 3 "Não recebido" no tipo de problema saem
     b = pd.read_excel(DADOS / "tabela_base.xlsx")
     u = pd.read_excel(DADOS / "ultima_tabela.xlsx")
     a = analisar(b, u, Parametros(referencia_backlog=pd.Timestamp("2026-10-10 18:00")))
     assert a["parametros"]["ignorar_nao_recebido"] is True
-    assert a["etapas"]["nao_recebido_base"] == 0 and a["etapas"]["nao_recebido_atual"] == 0
-    assert a["removidas"]["nao_recebido"] == []
+    assert a["etapas"]["nao_recebido_atual"] == 3  # 3 "Não recebido" no Last Problem Type
+    assert len(a["removidas"]["nao_recebido"]) >= 3
 
 
 def test_qualidade_na_importacao():

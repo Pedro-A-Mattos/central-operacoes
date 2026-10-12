@@ -70,17 +70,23 @@ def aplicar_filtro_descarregado(df: pd.DataFrame, ligado: bool) -> pd.DataFrame:
     return df[~(st == "descarregado").fillna(False)].reset_index(drop=True)
 
 
-# Grafias de "não recebido" aceitas no Last Scan Status (com e sem acento).
+# Grafias de "não recebido" aceitas (com e sem acento).
 VALORES_NAO_RECEBIDO = {"não recebido", "nao recebido"}
 
 
 def aplicar_filtro_nao_recebido(df: pd.DataFrame, ligado: bool) -> pd.DataFrame:
-    """RN-012: opcional, padrão ligado. Remove encomendas cujo Last Scan Status
-    seja 'não recebido' (espelha o filtro de descarregado)."""
-    if not ligado or STATUS_COL not in df.columns:
+    """RN-012: opcional, padrão ligado. Remove de toda a análise as encomendas
+    com 'não recebido' no Last Scan Status OU no Last Problem Type (as duas
+    grafias, com e sem acento). Espelha o filtro de descarregado, mas cobre
+    também o tipo de problema (decisão do usuário em 2026-10-12)."""
+    if not ligado:
         return df
-    st = df[STATUS_COL].astype("string").str.strip().str.lower()
-    return df[~st.isin(VALORES_NAO_RECEBIDO).fillna(False)].reset_index(drop=True)
+    mask = pd.Series(False, index=df.index)
+    for col in (STATUS_COL, PROBLEMA_COL):
+        if col in df.columns:
+            c = df[col].astype("string").str.strip().str.lower()
+            mask = mask | c.isin(VALORES_NAO_RECEBIDO).fillna(False)
+    return df[~mask].reset_index(drop=True)
 
 
 def remover_fm(df: pd.DataFrame) -> pd.DataFrame:

@@ -91,8 +91,9 @@ function normalizarRelatorio(t: Tabela): Dados[] {
 const filtroDescarregado = (df: Dados[], ligado: boolean) =>
   ligado ? df.filter((r) => minus(r[STATUS]).trim() !== "descarregado") : df;
 const VALORES_NAO_RECEBIDO = new Set(["não recebido", "nao recebido"]);
+// Remove quando "não recebido" aparece no Last Scan Status OU no Last Problem Type.
 const filtroNaoRecebido = (df: Dados[], ligado: boolean) =>
-  ligado ? df.filter((r) => !VALORES_NAO_RECEBIDO.has(minus(r[STATUS]).trim())) : df;
+  ligado ? df.filter((r) => !VALORES_NAO_RECEBIDO.has(minus(r[STATUS]).trim()) && !VALORES_NAO_RECEBIDO.has(minus(r[PROB]).trim())) : df;
 const removerFm = (df: Dados[]) => df.filter((r) => !ehFm(r[PROB]));
 function separarFora(df: Dados[]): [Dados[], Dados[]] {
   const d: Dados[] = [], f: Dados[] = [];

@@ -17,7 +17,7 @@ const GLOSSARIO: Record<string, Explicacao> = {
   pendente: {
     titulo: "Pendente",
     oQue: "Encomenda que ainda aparece no relatório atualizado, ou seja, que ainda falta entregar.",
-    calculo: "Toda linha do relatório atualizado conta como pendente, depois das remoções: força maior (sempre), sem cidade de destino (vai para Fora da jurisdição) e, se os filtros estiverem ligados, status “descarregado” e status “não recebido”.",
+    calculo: "Toda linha do relatório atualizado conta como pendente, depois das remoções: força maior (sempre), sem cidade de destino (vai para Fora da jurisdição) e, se os filtros estiverem ligados, status “descarregado” e “não recebido” (por status ou tipo de problema).",
     exemplo: "O relatório atualizado tem 552 linhas; 119 são força maior e 20 não têm cidade. Sobram 413 pendentes.",
     selo: "relatorio",
   },
@@ -240,8 +240,8 @@ const GLOSSARIO: Record<string, Explicacao> = {
   },
   nao_recebido: {
     titulo: "Ignorar “não recebido”",
-    oQue: "Remove dos dois relatórios as encomendas com status “não recebido” e recalcula tudo.",
-    calculo: "Compara o “Last Scan Status” com “não recebido” (com ou sem acento). Ligado por padrão desde 12/10. Pode ser desligado na confirmação da importação ou em Importação e critérios.",
+    oQue: "Remove dos dois relatórios as encomendas marcadas como “não recebido” e recalcula tudo.",
+    calculo: "Remove quando o “Last Scan Status” OU o “Last Problem Type” é “não recebido” (com ou sem acento). Essas encomendas saem de toda a análise, inclusive das exceções. Ligado por padrão desde 12/10. Pode ser desligado na confirmação da importação ou em Importação e critérios.",
   },
   a_entregar: { titulo: "Encomendas a entregar", oQue: "Lista das pendentes navegável por cidade e depois por entregador." },
   // ---------- incluídos em 11/10 ----------

@@ -144,9 +144,11 @@ def desempenho_entregadores(base: pd.DataFrame, ultima: pd.DataFrame, entregues_
         ainda = [prob_ult[a] for a in g[AWB_COL] if a in prob_ult]  # continuam na última
         anormal = int(sum(ainda))
         pendente = int(len(ainda) - anormal)
+        # arredonda meio-para-cima (igual ao Math.round do motor local -> paridade)
+        pct = float(np.floor(1000 * entregue / total + 0.5) / 10) if total else 0.0
         linhas.append({"entregador": ent, "total": total, "entregue": entregue,
                        "anormal": anormal, "pendente": pendente,
-                       "pct_entregue": round(100 * entregue / total, 1) if total else 0.0})
+                       "pct_entregue": pct})
     return pd.DataFrame(linhas, columns=["entregador", "total", "entregue", "anormal", "pendente", "pct_entregue"])
 
 
