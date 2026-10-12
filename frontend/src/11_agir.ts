@@ -5,6 +5,7 @@ function telaPiso(): HTMLElement {
   const todos = errosPiso();
   const lista = todos.filter((r) => (!f.tipos.length || f.tipos.includes(r.erro_piso!.tipo))
     && (!f.cidades.length || f.cidades.includes(String(r.dados["Consignee City"])))
+    && (!f.bairros.length || f.bairros.includes(String(r.dados["Consignee Area"])))
     && (!f.entregadores.length || f.entregadores.includes(entregadorDe(r.dados))));
   const set = (fn: () => void) => atualizar(() => { fn(); TAB.delete("piso"); });
   const porTipo = contar(todos, (r) => r.erro_piso!.tipo);
@@ -22,6 +23,7 @@ function telaPiso(): HTMLElement {
   const ativos: ChipFiltro[] = [
     ...f.tipos.map((x) => ({ texto: "Problema: " + x, remover: () => set(() => { f.tipos = f.tipos.filter((y) => y !== x); }) })),
     ...f.cidades.map((x) => ({ texto: "Cidade: " + x, remover: () => set(() => { f.cidades = f.cidades.filter((y) => y !== x); }) })),
+    ...f.bairros.map((x) => ({ texto: "Bairro: " + x, remover: () => set(() => { f.bairros = f.bairros.filter((y) => y !== x); }) })),
     ...f.entregadores.map((x) => ({ texto: "Entregador: " + x, remover: () => set(() => { f.entregadores = f.entregadores.filter((y) => y !== x); }) })),
   ];
 
@@ -30,15 +32,17 @@ function telaPiso(): HTMLElement {
       acoes: h("button", { type: "button", class: "btn btn-ghost", on: { click: () => navegar("regras", { de: "piso" }) } }, icone("regras", "ic ic-sm"), "Ver regras de abrangência") }),
     h("div", { class: "alerta-caixa tom-inferido" }, icone("inferido"),
       h("div", null, h("span", { class: "fig-tit" }, h("strong", null, "Como a conferência decide"), explica("regra_derivada", "piso"), explica("rigor", "piso")),
-        h("p", null, `As regras de quem entrega onde são aprendidas do relatório base: um entregador vale para uma cidade (ou bairro, nas cidades com ${a.parametros.min_entregadores_urbano} ou mais entregadores) quando tem pelo menos ${a.parametros.limiar_ruido} encomendas lá; o entregador com mais encomendas sempre vale. `,
-          ajustadas ? `${plural(ajustadas, "cidade tem", "cidades têm")} ajuste manual, que tem prioridade.` : "Nenhuma cidade tem ajuste manual."),
-        h("p", { class: "nota" }, "Uma regra derivada repete o histórico, inclusive erros recorrentes. Confirme antes de corrigir.", a.regras.cidades_ignoradas.length ? ` Cidades fora da conferência: ${a.regras.cidades_ignoradas.join(", ")}.` : ""))),
+        E.mapaRegiaoAtivo
+          ? h("p", null, `Usando o mapa de região (CEP) ${E.mapaRegiaoOrigem === "sessao" ? "carregado nesta sessão pelo Estudo de regiões" : "publicado como padrão"}: cada encomenda é conferida pelo CEP (com retorno para bairro e cidade quando o CEP não tem regra). Um entregador fora do conjunto do CEP aparece como “Entregador fora da área”.`)
+          : h("p", null, `As regras de quem entrega onde são aprendidas do relatório base: um entregador vale para uma cidade (ou bairro, nas cidades com ${a.parametros.min_entregadores_urbano} ou mais entregadores) quando tem pelo menos ${a.parametros.limiar_ruido} encomendas lá; o entregador com mais encomendas sempre vale. ${ajustadas ? `${plural(ajustadas, "cidade tem", "cidades têm")} ajuste manual, que tem prioridade.` : "Nenhuma cidade tem ajuste manual."}`),
+        h("p", { class: "nota" }, E.mapaRegiaoAtivo ? "Para trocar o mapa, gere um novo no Estudo de regiões e clique em “Usar neste navegador”." : "Uma regra derivada repete o histórico, inclusive erros recorrentes. Confirme antes de corrigir.", a.regras.cidades_ignoradas.length ? ` Cidades fora da conferência: ${a.regras.cidades_ignoradas.join(", ")}.` : ""))),
     todos.length ? [
       barraFiltros([
         multi({ id: "pi-tipo", rotulo: "Problema", opcoes: porTipo.map((t) => t.rotulo), valores: f.tipos, onMudar: (v) => set(() => { f.tipos = v; }) }),
         multi({ id: "pi-cid", rotulo: "Cidade", opcoes: unicos(todos.map((r) => r.dados["Consignee City"] as string)), valores: f.cidades, onMudar: (v) => set(() => { f.cidades = v; }) }),
+        multi({ id: "pi-bai", rotulo: "Bairro", opcoes: unicos(todos.filter((r) => !f.cidades.length || f.cidades.includes(String(r.dados["Consignee City"]))).map((r) => r.dados["Consignee Area"] as string)), valores: f.bairros, onMudar: (v) => set(() => { f.bairros = v; }), descricao: "Combina com a cidade." }),
         multi({ id: "pi-ent", rotulo: "Entregador atual", opcoes: unicos(todos.map((r) => entregadorDe(r.dados))), valores: f.entregadores, onMudar: (v) => set(() => { f.entregadores = v; }) }),
-      ], ativos, () => set(() => { E.f.piso = { tipos: [], cidades: [], entregadores: [] }; })),
+      ], ativos, () => set(() => { E.f.piso = filtrosVazios().piso; })),
       abas("piso-vista", [{ id: "tabela" as const, rotulo: "Tabela" }, { id: "roteiro" as const, rotulo: "Roteiro por entregador" }], f.vista || "tabela", (v) => set(() => { f.vista = v; })),
       f.vista === "roteiro" ? roteiroPiso(lista) : h("div", { class: "piso-layout" },
         h("section", { class: "bloco", "aria-labelledby": "pc-tit" },
@@ -49,7 +53,7 @@ function telaPiso(): HTMLElement {
               { id: "tipo", rotulo: "Problema", valor: (r) => r.erro_piso!.tipo, render: (r) => chipErro(r.erro_piso!.tipo) },
               { id: "local", rotulo: "Cidade · bairro", valor: (r) => `${r.dados["Consignee City"]} ${r.dados["Consignee Area"] ?? ""}`, render: (r) => h("span", { class: "duas" }, String(r.dados["Consignee City"]), h("small", null, valorTexto("Consignee Area", r.dados["Consignee Area"]))) },
               { id: "ent", rotulo: "Está com", valor: (r) => entregadorDe(r.dados), render: (r) => r.dados["Delivery Associate"] === null ? h("span", { class: "nulo" }, "Sem entregador") : String(r.dados["Delivery Associate"]) },
-              { id: "esp", rotulo: "Deveria estar com", valor: (r) => r.erro_piso!.esperados.join(", "), render: (r) => h("span", { class: "duas" }, r.erro_piso!.esperados.length ? r.erro_piso!.esperados.join(" ou ") : h("span", { class: "nulo" }, "Sem regra para indicar"), h("small", null, (r.erro_piso!.escopo === "bairro" ? "regra do bairro · " : "regra da cidade · ") + r.erro_piso!.origem_regra)) },
+              { id: "esp", rotulo: "Deveria estar com", valor: (r) => r.erro_piso!.esperados.join(", "), render: (r) => h("span", { class: "duas" }, r.erro_piso!.esperados.length ? r.erro_piso!.esperados.join(" ou ") : h("span", { class: "nulo" }, "Sem regra para indicar"), h("small", null, (r.erro_piso!.escopo === "cep" ? "regra do CEP · " : r.erro_piso!.escopo === "bairro" ? "regra do bairro · " : "regra da cidade · ") + r.erro_piso!.origem_regra)) },
             ],
             exportar: botaoExportar("correcoes_piso.xlsx", () => ({ linhas: lista.map((r) => ({ ...r.dados, tipo_erro: r.erro_piso!.tipo, detalhe: r.erro_piso!.detalhe, entregadores_esperados: r.erro_piso!.esperados.join(", ") })), colunas: [...COLUNAS_CONTRATO, "tipo_erro", "detalhe", "entregadores_esperados"] }), "Exportar correções", "piso") })),
         barras({ id: "pi-g-ent", titulo: "Por entregador atual", descricao: "Quem está com as encomendas a corrigir. Clique para filtrar.", unidade: ["correção", "correções"],
@@ -149,7 +153,7 @@ function telaExcecoes(): HTMLElement {
   const ativasPor: Record<TipoExcecao, RegAtual[]> = { devolucao: excAtivas("devolucao"), extravio: excAtivas("extravio"), insucesso: excAtivas("insucesso"), revisar_tentativas: excAtivas("revisar_tentativas") };
   const just = excJustificadas();
   const base = f.aba === "justificados" ? just : ativasPor[f.aba];
-  const lista = base.filter((r) => (!f.cidades.length || f.cidades.includes(String(r.dados["Consignee City"]))) && (!f.entregadores.length || f.entregadores.includes(entregadorDe(r.dados))));
+  const lista = base.filter((r) => (!f.cidades.length || f.cidades.includes(String(r.dados["Consignee City"]))) && (!f.bairros.length || f.bairros.includes(String(r.dados["Consignee Area"]))) && (!f.entregadores.length || f.entregadores.includes(entregadorDe(r.dados))));
   const totalAtivas = ativasPor.devolucao.length + ativasPor.extravio.length + ativasPor.insucesso.length + ativasPor.revisar_tentativas.length;
   const g = (r: RegAtual) => r.dados;
   const outrasJust = Object.keys(a.justificativas).filter((k) => !E.idx.has(k) || !(E.idx.get(k)!.fonte === "atual" && (E.idx.get(k) as any).reg.excecoes.length)).length;
@@ -181,10 +185,12 @@ function telaExcecoes(): HTMLElement {
       : REGRA_EXC[f.aba]),
     base.length ? barraFiltros([
       multi({ id: "x-cid", rotulo: "Cidade", opcoes: unicos(base.map((r) => r.dados["Consignee City"] as string)), valores: f.cidades, onMudar: (v) => set(() => { f.cidades = v; }) }),
+      multi({ id: "x-bai", rotulo: "Bairro", opcoes: unicos(base.filter((r) => !f.cidades.length || f.cidades.includes(String(r.dados["Consignee City"]))).map((r) => r.dados["Consignee Area"] as string)), valores: f.bairros, onMudar: (v) => set(() => { f.bairros = v; }), descricao: "Combina com a cidade." }),
       multi({ id: "x-ent", rotulo: "Entregador", opcoes: unicos(base.map((r) => entregadorDe(r.dados))), valores: f.entregadores, onMudar: (v) => set(() => { f.entregadores = v; }) }),
     ], [...f.cidades.map((x) => ({ texto: "Cidade: " + x, remover: () => set(() => { f.cidades = f.cidades.filter((y) => y !== x); }) })),
+        ...f.bairros.map((x) => ({ texto: "Bairro: " + x, remover: () => set(() => { f.bairros = f.bairros.filter((y) => y !== x); }) })),
         ...f.entregadores.map((x) => ({ texto: "Entregador: " + x, remover: () => set(() => { f.entregadores = f.entregadores.filter((y) => y !== x); }) }))],
-      () => set(() => { f.cidades = []; f.entregadores = []; })) : null,
+      () => set(() => { f.cidades = []; f.bairros = []; f.entregadores = []; })) : null,
     base.length
       ? tabela({ id: "exc", titulo: "Exceções", linhas: lista, chave: (r) => awbDe(r.dados), onAbrir: (r) => abrirAwb(awbDe(r.dados), f.aba !== "justificados" ? "justificar" : ""),
           colunas: f.aba === "justificados" ? colsJust : [...colsBase, { id: "acao", rotulo: "Ação", valor: () => null, ordenavel: false,

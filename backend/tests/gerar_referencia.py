@@ -12,6 +12,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 warnings.filterwarnings("ignore")
 from logistica import comparador as cmp  # noqa: E402
+from logistica import regras as rg  # noqa: E402
 from logistica.pipeline import Parametros, analisar, simular_regras, validar_arquivo  # noqa: E402
 
 REF = "2026-10-10 18:00:00"
@@ -58,4 +59,15 @@ for c in CENARIOS:
                               "cidades_ignoradas": ["Buritis"]}, "limiar_ruido": 2, "cidades_ignoradas": []}
     sim = simular_regras(prep(b), prep(u), atual_cfg, novo_cfg)
     saida.append({**c, "nome_atual": nome_atual, "resultado": r, "validacao": val, "simulacao": {"atual": atual_cfg, "novo": novo_cfg, "resultado": sim}})
-json.dump({"cenarios": saida}, sys.stdout, ensure_ascii=False)
+
+# Paridade do Modo Estudo/Validação por região (CEP): deriva e valida sobre a mesma planilha.
+_u = cmp.normalizar_relatorio(pd.read_excel(RAIZ / "dados_exemplo" / "ultima_tabela.xlsx"))
+regiao = []
+for limiar in (3, 10):
+    mapa = rg.derivar_regras_regiao(_u, limiar)
+    err = rg.validar_regiao(_u, mapa)
+    por_tipo = {k: int(v) for k, v in err["tipo_erro"].value_counts().items()} if len(err) else {}
+    regiao.append({"arquivo": "ultima_tabela.xlsx", "limiar": limiar, "mapa": mapa,
+                   "n_erros": int(len(err)), "por_tipo": por_tipo})
+
+json.dump({"cenarios": saida, "regiao": regiao}, sys.stdout, ensure_ascii=False)

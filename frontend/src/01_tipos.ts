@@ -14,7 +14,7 @@ interface ErroPiso {
   tipo: TipoErroPiso;
   detalhe: string;
   esperados: string[];
-  escopo: "bairro" | "cidade";
+  escopo: "bairro" | "cidade" | "cep";
   origem_regra: string;
 }
 
@@ -72,6 +72,7 @@ interface Analise {
   sairam: RegSaiu[];
   mudou_status: { awb: string; status_base: Valor; status_atual: Valor }[];
   fora: { base: Dados[]; atual: Dados[] };
+  nao_recebido_entregue: { dados: Dados; categoria: string; confirmada: boolean }[];
   regras: {
     por_cidade: Record<string, { entregadores: string[]; origem: string; urbana: boolean }>;
     por_bairro: { cidade: string; bairro: string; entregadores: string[] }[];
@@ -118,10 +119,15 @@ interface Simulacao {
 
 interface Overrides { por_cidade: Record<string, string[]>; cidades_ignoradas: string[] }
 
+// Modo Estudo/Validação por região (CEP). Mapa gerado no Estudo e consumido na Validação.
+interface MapaRegiao { limiar: number; por_cep: Record<string, string[]>; por_bairro: Record<string, string[]>; por_cidade: Record<string, string[]> }
+interface ErroRegiaoReg { awb: string; dados: Dados; tipo: string; detalhe: string; esperados: string[]; escopo: string }
+
 interface ParametrosAnalise {
   ignorar_descarregado: boolean;
   ignorar_nao_recebido: boolean;
   limiar_ruido: number;
   cidades_ignoradas: string[];
   referencia_backlog?: string | null;
+  mapa_regiao?: MapaRegiao | null;
 }

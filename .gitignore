@@ -6,3 +6,7 @@ backend/dados/
 __pycache__/
 *.pyc
 .pytest_cache/
+# Planilhas .xlsx contêm dados reais de clientes (PII) — nunca versionar,
+# exceto a fixture sintética de teste do frontend.
+*.xlsx
+!frontend/tests/saida_teste.xlsx

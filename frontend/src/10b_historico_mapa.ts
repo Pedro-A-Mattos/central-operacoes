@@ -147,6 +147,9 @@ function mapaCanvas(pts: PontoMapa[], corDe: (r: RegAtual) => { chave: string; t
   const tiles = new Map<string, HTMLImageElement>();
   let caiuParaEsquema = false;
   const atrib = h("div", { class: "mapa-atrib" }, "© ", h("a", { href: "https://www.openstreetmap.org/copyright", target: "_blank", rel: "noopener" }, "OpenStreetMap"), " contributors");
+  const dica = document.createElement("div");
+  dica.className = "mapa-dica";
+  dica.hidden = true;
 
   function desenhar() {
     ctx.clearRect(0, 0, W, H);
@@ -220,23 +223,51 @@ function mapaCanvas(pts: PontoMapa[], corDe: (r: RegAtual) => { chave: string; t
       vistaMapa.lat = (latRad * 180) / Math.PI;
       desenhar();
       canvas.style.cursor = "grabbing";
+      dica.hidden = true;
     } else {
       canvas.style.cursor = pontoNoEvento(ev) ? "pointer" : "grab";
+      const p = pontoNoEvento(ev);
+      if (p) {
+        const d = p.r.dados;
+        const cor = corDe(p.r);
+        const linha = (rot: string, val: Valor | string | null | undefined) => (val === null || val === undefined || String(val).trim() === "") ? "" : `<div><span>${rot}</span> ${String(val).replace(/</g, "&lt;")}</div>`;
+        const faixa = p.r.faixa_backlog ? `${p.r.faixa_backlog}${p.r.backlog_dias != null ? ` (${fmtDias(p.r.backlog_dias)})` : ""}` : null;
+        dica.innerHTML = `<strong class="mono">${awbDe(d)}</strong>`
+          + `<div class="mapa-dica-cor"><i class="tom-${cor.tom}"></i> ${cor.chave}</div>`
+          + linha("Cidade", d["Consignee City"])
+          + linha("Bairro", d["Consignee Area"])
+          + linha("CEP", d["Consignee Zip Code"])
+          + linha("Entregador", entregadorDe(d))
+          + linha("Status", d["Last Scan Status"])
+          + linha("Problema", d["Last Problem Type"])
+          + (faixa ? linha("Aguardando", faixa) : "")
+          + (p.r.erro_piso ? `<div class="mapa-dica-erro">${p.r.erro_piso.tipo}${p.r.erro_piso.esperados.length ? " · deveria: " + p.r.erro_piso.esperados.join(" ou ") : ""}</div>` : "");
+        const rect = canvas.getBoundingClientRect();
+        const dx = ((lonParaX(p.lon, z) - (lonParaX(vistaMapa.lon, z) - W / 2)) / W) * rect.width;
+        const dy = ((latParaY(p.lat, z) - (latParaY(vistaMapa.lat, z) - H / 2)) / H) * rect.height;
+        dica.style.left = Math.round(dx) + "px";
+        dica.style.top = Math.round(dy) + "px";
+        dica.hidden = false;
+      } else {
+        dica.hidden = true;
+      }
     }
   });
+  canvas.addEventListener("mouseleave", () => { dica.hidden = true; });
   canvas.addEventListener("click", (ev) => { if (moveu) return; const p = pontoNoEvento(ev); if (p) abrirAwb(awbDe(p.r.dados)); });
   // zoom na roda do mouse, centrado no cursor
   canvas.addEventListener("wheel", (ev) => {
     ev.preventDefault();
     const nz = Math.max(3, Math.min(18, z + (ev.deltaY < 0 ? 1 : -1)));
     if (nz === z) return;
-    z = nz; vistaMapa.z = nz; desenhar();
+    z = nz; vistaMapa.z = nz; dica.hidden = true; desenhar();
   }, { passive: false });
 
   const botao = (rotulo: string, delta: number, aria: string) =>
-    h("button", { type: "button", class: "mapa-zoom-btn", "aria-label": aria, on: { click: () => { z = Math.max(3, Math.min(18, z + delta)); vistaMapa.z = z; desenhar(); } } }, rotulo);
+    h("button", { type: "button", class: "mapa-zoom-btn", "aria-label": aria, on: { click: () => { z = Math.max(3, Math.min(18, z + delta)); vistaMapa.z = z; dica.hidden = true; desenhar(); } } }, rotulo);
 
   moldura.appendChild(canvas);
+  moldura.appendChild(dica);
   moldura.appendChild(h("div", { class: "mapa-zoom" }, botao("+", 1, "Aproximar"), botao("\u2212", -1, "Afastar")) as HTMLElement);
   moldura.appendChild(atrib as HTMLElement);
   // primeira pintura após o elemento entrar no DOM (getComputedStyle precisa estar montado)
@@ -283,18 +314,15 @@ function telaMapa(): HTMLElement {
       h("label", { class: "sel-ordem" }, h("span", null, "Colorir por"), h("select", { id: "mp-cor", on: { change: (e: Event) => atualizar(() => { m.cor = (e.target as HTMLSelectElement).value as typeof m.cor; }) } },
         h("option", { value: "situacao", selected: m.cor === "situacao" }, "Situação (piso e exceções)"),
         h("option", { value: "espera", selected: m.cor === "espera" }, "Há quanto tempo aguardam"),
-        h("option", { value: "rota", selected: m.cor === "rota" }, "Tempo em rota"))),
-      h("label", { class: "sel-ordem" }, h("span", null, "Fundo"), h("select", { id: "mp-modo", on: { change: (e: Event) => atualizar(() => { m.modo = (e.target as HTMLSelectElement).value as typeof m.modo; vistaMapa.chave = ""; }) } },
-        h("option", { value: "mapa", selected: m.modo === "mapa" }, "Mapa (OpenStreetMap)"),
-        h("option", { value: "esquema", selected: m.modo === "esquema" }, "Esquemático (sem internet)"))))),
+        h("option", { value: "rota", selected: m.cor === "rota" }, "Tempo em rota"))))),
     h("figure", { class: "grafico" },
       h("figcaption", null, h("span", { class: "fig-tit" }, h("strong", null, m.cidade ? "Pendências em " + m.cidade : "Pendências por localização"), explica("mapa", "fig")),
-        h("span", null, usarReal ? "Cada ponto é uma encomenda pendente. Clique para ver os detalhes. Arraste para mover e use a roda ou os botões + / − para aproximar." : "Cada ponto é uma encomenda pendente. Clique para ver os detalhes. Escolha uma cidade para aproximar.")),
+        h("span", null, usarReal ? "Cada ponto é uma encomenda pendente. Passe o mouse para ver os detalhes e clique para abrir. Arraste para mover e use a roda ou os botões + / − para aproximar." : "Cada ponto é uma encomenda pendente. Clique para ver os detalhes. Escolha uma cidade para aproximar.")),
       h("ul", { class: "legenda mapa-leg" }, ordemLeg.filter((k) => contagem.has(k)).map((k) => h("li", null, h("i", { class: "tom-" + contagem.get(k)!.tom }), `${k}: ${fmtN(contagem.get(k)!.n)}`))),
       mapa,
       h("p", { class: "nota" }, usarReal
-        ? "Mapa de fundo do OpenStreetMap; as posições vêm das coordenadas do relatório. Sem internet, troque “Fundo” para o modo esquemático. Para navegar pelo teclado, use a lista em "
-        : "Sem mapa de fundo: as posições vêm das coordenadas do relatório. Para navegar pelo teclado, use a lista em ",
+        ? "Mapa de fundo do OpenStreetMap; as posições vêm das coordenadas do relatório. Para navegar pelo teclado, use a lista em "
+        : "Sem internet para o mapa de fundo: mostrando as posições de forma esquemática. Para navegar pelo teclado, use a lista em ",
         h("button", { type: "button", class: "link", on: { click: () => navegar("pendencias", { de: "mapa", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, cidades: m.cidade ? [m.cidade] : [] }; } }) } }, "Pendências"), ".")));
 }
 

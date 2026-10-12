@@ -35,6 +35,8 @@ jobs:
           cp frontend/dist/index.html site/index.html
           # Regras de piso versionadas: GitHub -> aplicação (somente leitura).
           cp frontend/public/regras_piso.json site/regras_piso.json
+          # Mapa de regiões (ofuscado) para a conferência por CEP, se existir.
+          [ -f frontend/public/regras_regiao.b64 ] && cp frontend/public/regras_regiao.b64 site/regras_regiao.b64 || true
           # Evita o processamento Jekyll (não é necessário para um HTML único).
           touch site/.nojekyll
       - uses: actions/upload-pages-artifact@v3

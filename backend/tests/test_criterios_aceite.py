@@ -25,6 +25,37 @@ DADOS = RAIZ / "dados_exemplo"
 _cache: dict = {}
 
 
+def test_auditoria_metricas_par_real():
+    """Validação independente (para produção): recomputa cada métrica da torre
+    por fora do motor, no par ultima_tabela × dispatch_2026-10-11, e compara.
+    Garante que 'novas', 'saíram', 'mudou status' etc. não têm erro de fórmula."""
+    base_raw = pd.read_excel(DADOS / "ultima_tabela.xlsx")
+    atual_raw = pd.read_excel(DADOS / "dispatch_2026-10-11.xlsx")
+    ref = pd.Timestamp("2026-10-11 18:57:14")
+    a = analisar(base_raw, atual_raw, Parametros(ignorar_descarregado=False, ignorar_nao_recebido=False, referencia_backlog=ref))
+    base = cmp.normalizar_relatorio(base_raw)
+    atual = cmp.normalizar_relatorio(atual_raw)
+    bf = cmp.separar_fora_jurisdicao(cmp.remover_fm(base))[0]
+    af = cmp.separar_fora_jurisdicao(cmp.remover_fm(atual))[0]
+    bi, ai = set(bf[cmp.AWB_COL]), set(af[cmp.AWB_COL])
+    sb = dict(zip(bf[cmp.AWB_COL], bf["Last Scan Status"]))
+    su = dict(zip(af[cmp.AWB_COL], af["Last Scan Status"]))
+    mud = sum(1 for w in (ai & bi) if (pd.isna(sb.get(w)) != pd.isna(su.get(w))) or str(sb.get(w)) != str(su.get(w)))
+    saiu = bf[~bf[cmp.AWB_COL].isin(ai)]
+    txt = (saiu["Last Problem Type"].astype("string").fillna("") + " " + saiu["Last Problem Reason"].astype("string").fillna("")).str.lower()
+    dev = int(txt.apply(lambda t: any(p in t for p in cmp.PALAVRAS_DEVOLUCAO)).sum())
+    r = a["resumo"]
+    assert r["pendentes"] == len(af)
+    assert r["novas"] == len(ai - bi) == sum(1 for x in a["atual"] if x["nova"])
+    assert r["saiu_devolucao"] == dev
+    assert r["saiu_entregue"] == len(saiu) - dev
+    assert r["mudou_status"] == mud
+    assert r["base_total"] == len(bf) and r["ultima_total"] == len(af)
+    # Neste par específico, não há encomendas novas (todos os AWBs do atual já
+    # existiam na base) — "Novas = 0" é correto, não um defeito.
+    assert r["novas"] == 0
+
+
 def _base():
     if "b" not in _cache:
         _cache["b"] = cmp.carregar_relatorio(DADOS / "tabela_base.xlsx")
@@ -270,6 +301,77 @@ def test_simulacao_de_regra():
     sim = simular_regras(bf, uf, atual, {"overrides": {"por_cidade": {"Arinos": ["Giliard Barbosa de Oliveira", "Pedro Lopes de Jesus (Arinos)"]}}, "limiar_ruido": 3})
     assert sim["erros_antes"] == 31 and sim["deixam_de_ser_erro"] == 14 and sim["erros_depois"] == 17
     assert simular_regras(bf, uf, atual, atual)["mudancas"] == []
+
+
+# ---------- F1/F2: regras por região (CEP) ----------
+
+def test_regiao_canon_cep():
+    assert rg.canon_cep("38613-394") == "38613394"
+    assert rg.canon_cep(" 38610079 ") == "38610079"
+    assert rg.canon_cep(None) is None and rg.canon_cep("  ") is None
+
+
+def test_regiao_derivar_mapa_cep():
+    df = pd.DataFrame({
+        "Waybill No": [str(i) for i in range(1, 8)],
+        "Consignee Zip Code": ["38610-001"] * 5 + ["38610-002", "38610-002"],
+        "Consignee City": ["Unaí"] * 7,
+        "Consignee Area": ["Centro"] * 7,
+        "Delivery Associate": ["Ana", "Ana", "Ana", "Bruno", "Bruno", "Caio", "Ana"],
+    })
+    df = cmp.normalizar_relatorio(df)
+    mapa = rg.derivar_regras_regiao(df, limiar=2)
+    # CEP ...001: Ana (3) e Bruno (2) >= limiar 2 -> ambos; Caio (0 nesse CEP) ausente
+    assert set(mapa["por_cep"]["38610001"]) == {"Ana", "Bruno"}
+    # CEP ...002: Caio (1) e Ana (1) < limiar; dominante garante pelo menos 1
+    assert len(mapa["por_cep"]["38610002"]) >= 1
+    assert mapa["limiar"] == 2
+
+
+def test_regiao_validar_contra_mapa():
+    mapa = {"limiar": 2,
+            "por_cep": {"38610001": ["Ana", "Bruno"]},
+            "por_bairro": {"Unaí|Centro": ["Ana"]},
+            "por_cidade": {"Unaí": ["Ana", "Bruno", "Caio"]}}
+    df = pd.DataFrame({
+        "Waybill No": ["1", "2", "3", "4", "5"],
+        "Consignee Zip Code": ["38610-001", "38610-001", "38610-999", "38610-001", None],
+        "Consignee City": ["Unaí", "Unaí", "Cidade X", "Unaí", "Unaí"],
+        "Consignee Area": ["Centro", "Centro", None, "Centro", "Centro"],
+        "Delivery Associate": ["Ana", "Zé", "Ana", None, "Ana"],
+    })
+    df = cmp.normalizar_relatorio(df)
+    err = rg.validar_regiao(df, mapa)
+    por = {r["Waybill No"]: r["tipo_erro"] for _, r in err.iterrows()}
+    assert "1" not in por  # Ana no CEP ...001: correta
+    assert por["2"] == rg.ERRO_REGIAO_FORA  # Zé não atende o CEP
+    assert por["3"] == rg.ERRO_REGIAO_SEM_REGRA  # CEP/cidade sem regra
+    assert por["4"] == rg.ERRO_REGIAO_SEM_ENTREGADOR  # sem entregador
+    assert "5" not in por  # sem CEP, cai para bairro Unaí|Centro -> Ana ok
+
+
+def test_regiao_dados_exemplo():
+    u = cmp.normalizar_relatorio(pd.read_excel(DADOS / "ultima_tabela.xlsx"))
+    mapa = rg.derivar_regras_regiao(u, limiar=3)
+    assert len(mapa["por_cep"]) > 0 and len(mapa["por_cidade"]) == 11
+    err = rg.validar_regiao(u, mapa)
+    assert set(err["tipo_erro"].unique()) <= {rg.ERRO_REGIAO_FORA, rg.ERRO_REGIAO_SEM_ENTREGADOR, rg.ERRO_REGIAO_SEM_REGRA}
+
+
+def test_piso_usa_mapa_regiao_quando_presente():
+    # Com mapa_regiao, a conferência de piso valida por CEP (escopo 'cep',
+    # origem 'mapa de região'); sem mapa, mantém a derivada da base.
+    b = pd.read_excel(DADOS / "tabela_base.xlsx")
+    u = pd.read_excel(DADOS / "ultima_tabela.xlsx")
+    base_prep = cmp.separar_fora_jurisdicao(cmp.remover_fm(cmp.normalizar_relatorio(b)))[0]
+    mapa = rg.derivar_regras_regiao(base_prep, limiar=3)
+    a_sem = analisar(b, u, Parametros(referencia_backlog=pd.Timestamp("2026-10-10 18:00")))
+    a_com = analisar(b, u, Parametros(referencia_backlog=pd.Timestamp("2026-10-10 18:00"), mapa_regiao=mapa))
+    assert sum(1 for x in a_sem["atual"] if x["erro_piso"]) == 27  # default: filtros opcionais ligados
+    # com mapa: todos os erros têm origem 'mapa de região' e escopo de região
+    erros_com = [x["erro_piso"] for x in a_com["atual"] if x["erro_piso"]]
+    assert erros_com and all(e["origem_regra"] == "mapa de região" for e in erros_com)
+    assert all(e["escopo"] in ("cep", "bairro", "cidade") for e in erros_com)
 
 
 if __name__ == "__main__":

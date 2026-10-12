@@ -18,6 +18,7 @@ PROBLEMA_COL = "Last Problem Type"
 MOTIVO_COL = "Last Problem Reason"
 CIDADE_COL = "Consignee City"
 CHEGADA_COL = "Arrival Time"
+ZIP_COL = "Consignee Zip Code"
 
 # Força maior no Last Problem Type. A iMile usa pelo menos duas grafias:
 # "Ocorrênia FM" (com erro de digitação) e "Force majeure". A detecção é por

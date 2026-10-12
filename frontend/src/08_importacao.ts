@@ -55,13 +55,44 @@ function registroDe(a: Analise): RegistroImportacao {
   };
 }
 
+// Modo "conferir piso de 1 tabela": usa a mesma planilha como base e atualizado,
+// com o mapa de região ativo. Todas as linhas viram "pendentes" e a conferência
+// de piso roda por região (CEP). Exige um mapa de região ativo.
+async function processarPisoUnico() {
+  const arq = E.imp.base;
+  if (!pronto(arq)) return;
+  if (!E.mapaRegiaoAtivo) {
+    atualizar(() => { E.imp.erroGeral = { titulo: "Nenhum mapa de região definido", significado: "A conferência de piso de uma tabela usa o mapa de quem atende cada região (CEP). Sem ele, não há como apontar atribuições erradas.", acao: "Abra o Estudo de regiões, gere o mapa e clique em “Usar neste navegador” (ou publique o regras_regiao.json padrão)." }; });
+    return;
+  }
+  const etapas = ["Conferindo o relatório", "Removendo força maior e separando fora da jurisdição", "Aplicando o mapa de região", "Conferindo o piso"];
+  atualizar(() => { E.imp.processando = true; E.imp.erroGeral = null; E.imp.etapas = etapas.map((t) => ({ texto: t, feito: false })); });
+  try {
+    E.imp.etapas[0].feito = true; renderizar(); await espera(60);
+    // base == atual: nada "sai"; tudo é pendente e conferido pelo mapa de região
+    const a = await E.servico!.analisar(arq!, arq!, { ...E.params, mapa_regiao: E.mapaRegiaoAtivo });
+    for (const et of E.imp.etapas) et.feito = true;
+    renderizar(); await espera(120);
+    atualizar(() => {
+      E.analise = a; indexar(a); E.desempenho = a.desempenho;
+      E.overrides = { por_cidade: {}, cidades_ignoradas: [] };
+      E.f = filtrosVazios(); E.pisoUnico = true; E.imp.processando = false;
+    });
+    E.servico!.obterRegras().then((ov) => atualizar(() => { E.overrides = ov; })).catch(() => {});
+    navegar("piso");
+    aviso(`Conferência de piso: ${plural(errosPiso().length, "encomenda para revisar", "encomendas para revisar")} de ${fmtN(a.resumo.pendentes)}.`);
+  } catch (e) {
+    atualizar(() => { E.imp.processando = false; E.imp.erroGeral = problemaDe(e); });
+  }
+}
+
 async function processar(reprocessar = false) {
   if (!pronto(E.imp.base) || !pronto(E.imp.atual)) return;
   const etapas = ["Conferindo os dois relatórios", "Removendo força maior e separando fora da jurisdição", "Comparando base × atualizado por código (AWB)", "Conferindo piso, exceções e desempenho"];
   atualizar(() => { E.imp.processando = true; E.imp.erroGeral = null; E.imp.etapas = etapas.map((t) => ({ texto: t, feito: false })); });
   try {
     E.imp.etapas[0].feito = true; renderizar(); await espera(60);
-    const a = await E.servico!.analisar(E.imp.base!, E.imp.atual!, E.params);
+    const a = await E.servico!.analisar(E.imp.base!, E.imp.atual!, { ...E.params, mapa_regiao: E.mapaRegiaoAtivo });
     for (const et of E.imp.etapas) et.feito = true;
     renderizar(); await espera(120);
     const filtrosAntes = E.f;
@@ -69,6 +100,7 @@ async function processar(reprocessar = false) {
       E.analise = a; indexar(a); E.desempenho = a.desempenho;
       E.overrides = { por_cidade: {}, cidades_ignoradas: [] };
       if (!reprocessar) E.f = filtrosVazios(); else { E.f = filtrosAntes; E.f.entregadores.dias = []; E.f.entregadores.sel = null; E.f.pendencias.dias = E.f.pendencias.dias.filter((d) => a.dias_chegada.includes(d)); }
+      E.pisoUnico = false;
       E.imp.processando = false;
     });
     E.servico!.obterRegras().then((ov) => atualizar(() => { E.overrides = ov; })).catch(() => {});
@@ -92,8 +124,11 @@ function caixaProblema(p: ProblemaArquivo): HTMLElement {
 
 function zonaArquivo(papel: Papel): HTMLElement {
   const info = E.imp[papel], erro = E.imp.erro[papel], lendo = E.imp.lendo[papel];
-  const titulo = papel === "base" ? "Relatório base" : "Relatório atualizado";
-  const desc = papel === "base"
+  const piso1 = E.imp.modo === "piso1";
+  const titulo = piso1 ? "Planilha de entregas" : papel === "base" ? "Relatório base" : "Relatório atualizado";
+  const desc = piso1
+    ? "As entregas que você quer conferir. Cada linha é checada contra o mapa de regiões (CEP) para apontar entregador em região errada."
+    : papel === "base"
     ? "O retrato anterior da operação. O que estava aqui e sumiu do atualizado vira provável entrega ou possível devolução."
     : "O retrato mais recente. Tudo o que está nele é tratado como pendente: o que ainda falta entregar.";
   const input = h("input", { type: "file", accept: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", id: "arq-" + papel, class: "sr",
@@ -148,7 +183,7 @@ const ORIGEM_REF: Record<OrigemReferencia, string> = {
 };
 const paraInputData = (s: string) => s.replace(" ", "T").slice(0, 16);
 function caixaReferencia(): HTMLElement {
-  const v = E.imp.atual!;
+  const v = (E.imp.modo === "piso1" ? E.imp.base : E.imp.atual)!;
   const definida = E.params.referencia_backlog || null;
   const sugerida = v.referencia_sugerida || null;
   const efetiva = definida || sugerida;
@@ -200,9 +235,45 @@ function telaImportar(): HTMLElement {
           h("button", { type: "button", class: "btn btn-pri", id: "btn-processar", on: { click: () => processar() } }, "Processar análise"),
           h("button", { type: "button", class: "btn btn-ghost", on: { click: trocarOrdem } }, icone("trocar", "ic ic-sm"), "Trocar a ordem"))) : null;
 
+  const seletorModo = h("div", { class: "modo-import", role: "radiogroup", "aria-label": "O que você quer fazer" },
+    h("button", { type: "button", class: "modo-op" + (imp.modo === "completa" ? " sel" : ""), "aria-pressed": imp.modo === "completa" ? "true" : "false",
+      on: { click: () => atualizar(() => { imp.modo = "completa"; imp.erroGeral = null; }) } },
+      h("strong", null, "Análise completa"), h("small", null, "Duas tabelas (base × atualizado): pendências, exceções, desempenho e piso.")),
+    h("button", { type: "button", class: "modo-op" + (imp.modo === "piso1" ? " sel" : ""), "aria-pressed": imp.modo === "piso1" ? "true" : "false",
+      on: { click: () => atualizar(() => { imp.modo = "piso1"; imp.erroGeral = null; }) } },
+      h("strong", null, "Conferir piso de 1 tabela"), h("small", null, "Uma tabela só: usa o mapa de regiões para apontar entregas em região errada.")));
+
+  if (imp.modo === "piso1") {
+    const temMapa = !!E.mapaRegiaoAtivo;
+    const prontoArq = pronto(imp.base);
+    return h("div", { class: "tela tela-importar" },
+      cabecalho({ area: "Início", titulo: "Nova importação", pergunta: "O que você quer fazer?",
+        acoes: E.analise && !imp.processando ? h("button", { type: "button", class: "btn btn-ghost", on: { click: () => navegar("torre") } }, "Voltar à análise atual") : null }),
+      seletorModo,
+      temMapa
+        ? h("div", { class: "alerta-caixa tom-ok" }, icone("ok"), h("div", null, h("strong", null, "Mapa de regiões ativo"),
+            h("p", null, `A conferência usará o mapa ${E.mapaRegiaoOrigem === "sessao" ? "carregado nesta sessão (Estudo de regiões)" : "publicado como padrão"} para apontar entregas em região errada.`)))
+        : h("div", { class: "alerta-caixa tom-atencao", role: "alert" }, icone("alerta"), h("div", null, h("strong", null, "Nenhum mapa de regiões definido"),
+            h("p", null, "A conferência de piso de uma tabela precisa saber quem atende cada região. Gere o mapa no Estudo de regiões e clique em “Usar neste navegador”."),
+            h("button", { type: "button", class: "btn btn-sec", on: { click: () => navegar("estudo") } }, icone("regras", "ic ic-sm"), "Ir para o Estudo de regiões"))),
+      imp.erroGeral ? caixaProblema(imp.erroGeral) : null,
+      h("div", { class: "zonas uma" }, zonaArquivo("base")),
+      prontoArq ? h("section", { class: "confirmar" },
+        caixaReferencia(),
+        h("div", { class: "conf-opcoes" },
+          alternar({ id: "opt-desc", ajuda: "descarregado", rotulo: "Ignorar encomendas com status “descarregado”", valor: E.params.ignorar_descarregado, onMudar: (v) => atualizar(() => { E.params.ignorar_descarregado = v; }), dica: "Remove essas encomendas da conferência." }),
+          alternar({ id: "opt-nrec", ajuda: "nao_recebido", rotulo: "Ignorar encomendas “não recebido”", valor: E.params.ignorar_nao_recebido, onMudar: (v) => atualizar(() => { E.params.ignorar_nao_recebido = v; }), dica: "Remove as encomendas “não recebido” da conferência." })),
+        imp.processando
+          ? h("ol", { class: "etapas", "aria-live": "polite" }, imp.etapas.map((et) => h("li", { class: et.feito ? "feito" : "andando" }, et.feito ? icone("ok", "ic ic-sm") : h("span", { class: "giro", "aria-hidden": "true" }), et.texto)))
+          : h("div", { class: "conf-acoes" }, h("button", { type: "button", class: "btn btn-pri", id: "btn-conferir-piso", disabled: !temMapa, on: { click: () => processarPisoUnico() } }, "Conferir piso"))) : null,
+      !prontoArq ? h("p", { class: "exemplos" }, "Quer testar? ",
+        h("button", { type: "button", class: "link", on: { click: () => usarExemplos() } }, "Usar uma planilha de exemplo"), ".") : null);
+  }
+
   return h("div", { class: "tela tela-importar" },
-    cabecalho({ area: "Início", titulo: "Nova importação", pergunta: "Quais dois retratos da operação você quer comparar?",
+    cabecalho({ area: "Início", titulo: "Nova importação", pergunta: "O que você quer fazer?",
       acoes: E.analise && !imp.processando ? h("button", { type: "button", class: "btn btn-ghost", on: { click: () => navegar("torre") } }, "Voltar à análise atual") : null }),
+    seletorModo,
     h("ol", { class: "passos", "aria-label": "Etapas da importação" }, passos.map((p, i) => h("li", { class: i + 1 < passo ? "feito" : i + 1 === passo ? "atual" : "", "aria-current": i + 1 === passo ? "step" : null }, h("span", null, String(i + 1)), p))),
     imp.erroGeral ? caixaProblema(imp.erroGeral) : null,
     h("div", { class: "zonas" }, zonaArquivo("base"),

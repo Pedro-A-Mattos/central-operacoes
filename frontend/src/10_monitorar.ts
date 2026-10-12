@@ -6,6 +6,7 @@ function filtrarPendencias(f: FiltrosPend): RegAtual[] {
   return E.analise!.atual.filter((r) => {
     const d = r.dados;
     if (f.cidades.length && !f.cidades.includes(String(d["Consignee City"]))) return false;
+    if (f.bairros.length && !f.bairros.includes(String(d["Consignee Area"]))) return false;
     if (f.classes.length && !f.classes.includes(r.classe_operacional)) return false;
     if (f.faixas.length && !(r.faixa_backlog && f.faixas.includes(r.faixa_backlog))) return false;
     if (f.rota.length) { const fr = faixaRota(r); if (!fr || !f.rota.includes(fr)) return false; }
@@ -42,6 +43,7 @@ function telaPendencias(): HTMLElement {
   const set = (fn: () => void) => atualizar(() => { fn(); TAB.delete("pend"); });
   const ativos: ChipFiltro[] = [
     ...f.cidades.map((c) => ({ texto: "Cidade: " + c, remover: () => set(() => { f.cidades = f.cidades.filter((x) => x !== c); }) })),
+    ...f.bairros.map((c) => ({ texto: "Bairro: " + c, remover: () => set(() => { f.bairros = f.bairros.filter((x) => x !== c); }) })),
     ...f.classes.map((c) => ({ texto: "Classe: " + c, remover: () => set(() => { f.classes = f.classes.filter((x) => x !== c); }) })),
     ...f.faixas.map((c) => ({ texto: "Aguardando: " + c, remover: () => set(() => { f.faixas = f.faixas.filter((x) => x !== c); }) })),
     ...f.rota.map((c) => ({ texto: "Em rota: " + c, remover: () => set(() => { f.rota = f.rota.filter((x) => x !== c); }) })),
@@ -65,6 +67,7 @@ function telaPendencias(): HTMLElement {
 
   const controles = [
     multi({ id: "p-cid", rotulo: "Cidade", opcoes: unicos(a.atual.map((r) => r.dados["Consignee City"] as string)), valores: f.cidades, onMudar: (v) => set(() => { f.cidades = v; }) }),
+    multi({ id: "p-bai", rotulo: "Bairro", opcoes: unicos(a.atual.filter((r) => !f.cidades.length || f.cidades.includes(String(r.dados["Consignee City"]))).map((r) => r.dados["Consignee Area"] as string)), valores: f.bairros, onMudar: (v) => set(() => { f.bairros = v; }), descricao: "Combina com a cidade. Sem cidade escolhida, lista os bairros de todas." }),
     multi({ id: "p-cls", ajuda: "classe_operacional", rotulo: "Classe operacional", opcoes: ["Entregue", "Não entregue", "Anormal"], valores: f.classes, onMudar: (v) => set(() => { f.classes = v; }),
       descricao: "Pelo status e pela data de entrega do relatório: Anormal = tem problema; Entregue = status de entregue ou data de entrega preenchida." }),
     multi({ id: "p-fx", ajuda: "tempo_espera", rotulo: "Aguardando", opcoes: ["0-1 dia", "2-3 dias", "4+ dias"], valores: f.faixas, onMudar: (v) => set(() => { f.faixas = v; }), descricao: "Dias desde a chegada ao galpão." }),

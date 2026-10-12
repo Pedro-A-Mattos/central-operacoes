@@ -52,6 +52,7 @@ class Parametros:
     cidades_ignoradas: list[str] = field(default_factory=list)
     overrides: dict = field(default_factory=lambda: {"por_cidade": {}, "cidades_ignoradas": []})
     referencia_backlog: pd.Timestamp | None = None
+    mapa_regiao: dict | None = None  # quando presente, a conferência de piso valida por região (CEP)
 
 
 def _valor(v):
@@ -196,6 +197,38 @@ def _palavra_devolucao(texto: str) -> str | None:
     return None
 
 
+_NR = {"não recebido", "nao recebido"}
+
+
+def _nao_recebido_com_entrega(ult: pd.DataFrame) -> list[dict]:
+    """Linhas 'não recebido' (status OU tipo de problema) que têm indício de
+    entrega: status de entrega/assinatura (entrega_confirmada) OU Delivery Time
+    preenchido. Calculado do atual bruto (antes dos filtros opcionais)."""
+    if ult is None or not len(ult):
+        return []
+    st = ult.get(cmp.STATUS_COL)
+    pt = ult.get(cmp.PROBLEMA_COL)
+    st_l = st.astype("string").str.strip().str.lower() if st is not None else pd.Series("", index=ult.index)
+    pt_l = pt.astype("string").str.strip().str.lower() if pt is not None else pd.Series("", index=ult.index)
+    eh_nr = st_l.isin(_NR).fillna(False) | pt_l.isin(_NR).fillna(False)
+    sub = ult[eh_nr]
+    if not len(sub):
+        return []
+    confirmada = met.entrega_confirmada(sub)
+    dt = pd.to_datetime(sub.get("Delivery Time"), errors="coerce") if "Delivery Time" in sub.columns else pd.Series(pd.NaT, index=sub.index)
+    tem_dt = dt.notna()
+    out = []
+    for i, (_, linha) in enumerate(sub.iterrows()):
+        conf = bool(confirmada.iloc[i])
+        tdt = bool(tem_dt.iloc[i])
+        if not (conf or tdt):
+            continue
+        out.append({"dados": {c: _valor(linha[c]) for c in COLUNAS if c in sub.columns},
+                    "categoria": "Com Delivery Time" if tdt else "Sem Delivery Time",
+                    "confirmada": conf})
+    return out
+
+
 def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
              justificativas: dict | None = None, nomes: tuple[str, str] = ("base", "atual")) -> dict:
     base = cmp.normalizar_relatorio(base_bruto)
@@ -219,7 +252,11 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
     overrides = p.overrides or {"por_cidade": {}, "cidades_ignoradas": []}
     regras = rg.aplicar_overrides(rg.derivar_regras(base_f, p.limiar_ruido), overrides)
     ignoradas = list(dict.fromkeys(list(overrides.get("cidades_ignoradas", [])) + list(p.cidades_ignoradas)))
-    erros = rg.validar_piso(res.pendentes, regras, ignoradas)
+    usar_regiao = bool(p.mapa_regiao and (p.mapa_regiao.get("por_cep") or p.mapa_regiao.get("por_bairro") or p.mapa_regiao.get("por_cidade")))
+    if usar_regiao:
+        erros = rg.validar_piso_por_regiao(res.pendentes, p.mapa_regiao, ignoradas)
+    else:
+        erros = rg.validar_piso(res.pendentes, regras, ignoradas)
 
     pend = res.pendentes.copy()
     classe = met.classificar(pend)
@@ -254,11 +291,16 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
         if e is not None:
             cidade = reg.get(cmp.CIDADE_COL)
             bairro = reg.get(rg.AREA_COL)
-            _, escopo = regras.entregadores_validos(cidade, bairro) if cidade else (set(), "cidade")
+            if usar_regiao:
+                escopo = e.get("escopo", "cidade")
+                origem = e.get("origem_regra", "mapa de região")
+            else:
+                _, escopo = regras.entregadores_validos(cidade, bairro) if cidade else (set(), "cidade")
+                origem = regras.origem_cidade.get(cidade, "sem regra")
             d["erro_piso"] = {"tipo": e["tipo_erro"], "detalhe": e["detalhe"],
                               "esperados": [x for x in e["entregadores_esperados"].split(", ") if x],
                               "escopo": escopo,
-                              "origem_regra": regras.origem_cidade.get(cidade, "sem regra")}
+                              "origem_regra": origem}
         else:
             d["erro_piso"] = None
         tipos = []
@@ -283,6 +325,10 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
                        for (c, b), v in sorted(regras.por_bairro.items())],
         "cidades_ignoradas": ignoradas,
     }
+
+    # "Não recebido, com indício de entrega": calculado do ATUAL bruto (antes dos
+    # filtros opcionais), senão o filtro de não recebido esvaziaria a análise.
+    nr_entregue = _nao_recebido_com_entrega(ult)
 
     return {
         "versao": VERSAO_CONTRATO,
@@ -315,6 +361,7 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
         "sairam": sairam,
         "mudou_status": [{"awb": k, "status_base": _valor(v[0]), "status_atual": _valor(v[1])} for k, v in mudou.items()],
         "fora": {"base": _registros(base_fora), "atual": _registros(ult_fora)},
+        "nao_recebido_entregue": nr_entregue,
         "regras": regras_out,
         "dias_chegada": cmp.dias_chegada_disponiveis(ult_f),
         "dias_chegada_entregadores": sorted(set(cmp.dias_chegada_disponiveis(base_f)) | set(cmp.dias_chegada_disponiveis(ult_f))),

@@ -12,8 +12,8 @@ const src = join(raiz, "src");
 const codigo = ["01_tipos.ts", "02_xlsx.ts", "03_motor.ts"]
   .map((f) => stripTypeScriptTypes(readFileSync(join(src, f), "utf8"), { mode: "strip" })).join("\n");
 const ctx = vm.createContext({ DecompressionStream, Blob, Response, TextDecoder, console });
-vm.runInContext(codigo + "\nglobalThis.api = { lerPlanilhaXlsx, analisarLocal, validarTabela, desempenhoLocal, simularRegrasLocal };", ctx);
-const { lerPlanilhaXlsx, analisarLocal, validarTabela, simularRegrasLocal } = ctx.api;
+vm.runInContext(codigo + "\nglobalThis.api = { lerPlanilhaXlsx, analisarLocal, validarTabela, desempenhoLocal, simularRegrasLocal, derivarRegiaoLocal, validarRegiaoLocal, normalizarRelatorio };", ctx);
+const { lerPlanilhaXlsx, analisarLocal, validarTabela, simularRegrasLocal, derivarRegiaoLocal, validarRegiaoLocal, normalizarRelatorio } = ctx.api;
 
 const ref = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const dados = join(raiz, "..", "backend", "dados_exemplo");
@@ -55,12 +55,29 @@ for (const cenario of ref.cenarios) {
   igual(t + " sairam", L.sairam.map((x) => [chave(x), x.categoria, x.indicio]).sort(), P.sairam.map((x) => [chave(x), x.categoria, x.indicio]).sort());
   igual(t + " mudou_status", L.mudou_status, P.mudou_status);
   igual(t + " fora", [L.fora.base.length, L.fora.atual.length], [P.fora.base.length, P.fora.atual.length]);
+  const nrOrd = (x) => [...x].map((e) => [String(e.dados["Waybill No"]), e.categoria, e.confirmada]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  igual(t + " nao_recebido_entregue", nrOrd(L.nao_recebido_entregue), nrOrd(P.nao_recebido_entregue));
   igual(t + " regras", L.regras, P.regras);
   igual(t + " dias", [L.dias_chegada, L.dias_chegada_entregadores], [P.dias_chegada, P.dias_chegada_entregadores]);
   const ord = (d) => [...d.linhas].sort((a, b) => (a.entregador < b.entregador ? -1 : 1));
   igual(t + " desempenho", ord(L.desempenho), ord(P.desempenho));
   const awbsOrd = (d) => Object.fromEntries(Object.entries(d.awbs).sort().map(([k, v]) => [k, Object.fromEntries(Object.entries(v).sort().map(([c, l]) => [c, [...l].sort()]))]));
   igual(t + " desempenho.awbs", awbsOrd(L.desempenho), awbsOrd(P.desempenho));
+}
+
+// Paridade do Modo Estudo/Validação por região (CEP)
+if (ref.regiao) {
+  const tu = await ler("ultima_tabela.xlsx");
+  const rows = normalizarRelatorio(tu);
+  for (const bloco of ref.regiao) {
+    const mapaL = derivarRegiaoLocal(rows, bloco.limiar);
+    igual(`[regiao limiar=${bloco.limiar}] mapa`, mapaL, bloco.mapa);
+    const errL = validarRegiaoLocal(rows, mapaL);
+    const porTipoL = {};
+    for (const e of errL) porTipoL[e.tipo] = (porTipoL[e.tipo] || 0) + 1;
+    igual(`[regiao limiar=${bloco.limiar}] n_erros`, errL.length, bloco.n_erros);
+    igual(`[regiao limiar=${bloco.limiar}] por_tipo`, porTipoL, bloco.por_tipo);
+  }
 }
 console.log(falhas ? `\n${falhas} diferença(s)` : "\nParidade completa.");
 process.exit(falhas ? 1 : 0);

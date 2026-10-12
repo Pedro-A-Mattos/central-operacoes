@@ -12,16 +12,16 @@ function telaTorre(): HTMLElement {
   type Alerta = { tom: Tom; n: number; texto: string; origem: string; acao: string; ir: () => void; extra?: Filho };
   const alertas: Alerta[] = [];
   if (piso.length) alertas.push({ tom: "critico", n: piso.length, texto: `${plural(piso.length, "encomenda", "encomendas")} com possível erro de cidade ou entregador`, origem: "Conferência de piso", acao: "Revisar antes do carregamento",
-    ir: () => navegar("piso", { de: "torre", prep: () => { E.f.piso = { tipos: [], cidades: [], entregadores: [] }; } }),
-    extra: h("span", { class: "alerta-sub" }, porTipo.map((t) => h("button", { type: "button", class: "link", on: { click: () => navegar("piso", { de: "torre", prep: () => { E.f.piso = { tipos: [t.rotulo], cidades: [], entregadores: [] }; } }) } }, `${t.rotulo}: ${fmtN(t.valor)}`))) });
+    ir: () => navegar("piso", { de: "torre", prep: () => { E.f.piso = filtrosVazios().piso; } }),
+    extra: h("span", { class: "alerta-sub" }, porTipo.map((t) => h("button", { type: "button", class: "link", on: { click: () => navegar("piso", { de: "torre", prep: () => { E.f.piso = { ...filtrosVazios().piso, tipos: [t.rotulo] }; } }) } }, `${t.rotulo}: ${fmtN(t.valor)}`))) });
   if (dev.length) alertas.push({ tom: "critico", n: dev.length, texto: `${plural(dev.length, "encomenda", "encomendas")} com 3 ou mais tentativas por ausência ou recusa`, origem: "Exceções", acao: "Decidir devolução ou justificar",
-    ir: () => navegar("excecoes", { de: "torre", prep: () => { E.f.excecoes = { aba: "devolucao", cidades: [], entregadores: [] }; } }) });
+    ir: () => navegar("excecoes", { de: "torre", prep: () => { E.f.excecoes = { ...filtrosVazios().excecoes, aba: "devolucao" }; } }) });
   if (ext.length) alertas.push({ tom: "critico", n: ext.length, texto: `${plural(ext.length, "possível extravio", "possíveis extravios")}`, origem: "Exceções", acao: "Investigar",
-    ir: () => navegar("excecoes", { de: "torre", prep: () => { E.f.excecoes = { aba: "extravio", cidades: [], entregadores: [] }; } }) });
+    ir: () => navegar("excecoes", { de: "torre", prep: () => { E.f.excecoes = { ...filtrosVazios().excecoes, aba: "extravio" }; } }) });
   if (ins.length) alertas.push({ tom: "atencao", n: ins.length, texto: `${plural(ins.length, "insucesso", "insucessos")} de entrega aguardando nova tentativa`, origem: "Exceções", acao: "Planejar nova tentativa",
-    ir: () => navegar("excecoes", { de: "torre", prep: () => { E.f.excecoes = { aba: "insucesso", cidades: [], entregadores: [] }; } }) });
+    ir: () => navegar("excecoes", { de: "torre", prep: () => { E.f.excecoes = { ...filtrosVazios().excecoes, aba: "insucesso" }; } }) });
   if (rev.length) alertas.push({ tom: "atencao", n: rev.length, texto: `${plural(rev.length, "encomenda tem", "encomendas têm")} 3 ou mais tentativas por outro motivo (ex.: reprogramação)`, origem: "Exceções", acao: "Revisar caso a caso",
-    ir: () => navegar("excecoes", { de: "torre", prep: () => { E.f.excecoes = { aba: "revisar_tentativas", cidades: [], entregadores: [] }; } }) });
+    ir: () => navegar("excecoes", { de: "torre", prep: () => { E.f.excecoes = { ...filtrosVazios().excecoes, aba: "revisar_tentativas" }; } }) });
   const longas = a.atual.filter((r) => faixaRota(r) === "Mais de 24 h");
   if (longas.length) alertas.push({ tom: "atencao", n: longas.length, texto: `${plural(longas.length, "encomenda saiu", "encomendas saíram")} para entrega há mais de 24 h e ${longas.length === 1 ? "segue" : "seguem"} sem entrega confirmada`, origem: "Pendências · tempo em rota", acao: "Cobrar retorno do entregador",
     ir: () => navegar("pendencias", { de: "torre", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, rota: ["Mais de 24 h"] }; } }) });
@@ -39,7 +39,7 @@ function telaTorre(): HTMLElement {
     kpi({ rotulo: "Possíveis devoluções", ajuda: "possivel_devolucao", valor: a.resumo.saiu_devolucao, selo: "inferido", nota: "Saíram com palavra de devolução no problema", destino: () => navegar("mudancas", { de: "torre", prep: () => { E.f.mudancas.aba = "possivel_devolucao"; } }) }),
     kpi({ rotulo: "Novas", ajuda: "novas", valor: a.resumo.novas, nota: "Só aparecem no relatório atualizado", destino: () => navegar("mudancas", { de: "torre", prep: () => { E.f.mudancas.aba = "novas"; } }) }),
     kpi({ rotulo: "Com ocorrência", ajuda: "com_ocorrencia", valor: comProblema.length, tom: comProblema.length ? "atencao" : undefined, nota: "Pendentes com problema registrado", destino: () => navegar("pendencias", { de: "torre", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, soProblema: true }; } }) }),
-    kpi({ rotulo: "Problemas de piso", ajuda: "piso", valor: piso.length, tom: piso.length ? "critico" : "ok", nota: "Cidade ou entregador fora da regra", destino: () => navegar("piso", { de: "torre", prep: () => { E.f.piso = { tipos: [], cidades: [], entregadores: [] }; } }) }));
+    kpi({ rotulo: "Problemas de piso", ajuda: "piso", valor: piso.length, tom: piso.length ? "critico" : "ok", nota: "Cidade ou entregador fora da regra", destino: () => navegar("piso", { de: "torre", prep: () => { E.f.piso = filtrosVazios().piso; } }) }));
 
   const irPend = (prep: (f: FiltrosPend) => void) => navegar("pendencias", { de: "torre", prep: () => { const f = filtrosVazios().pendencias; prep(f); E.f.pendencias = f; } });
   const faixas = (["0-1 dia", "2-3 dias", "4+ dias"] as Faixa[]).map((f) => ({ rotulo: f, valor: a.atual.filter((r) => r.faixa_backlog === f).length, tom: TOM_FAIXA[f] }));

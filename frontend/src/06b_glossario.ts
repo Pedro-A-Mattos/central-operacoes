@@ -243,6 +243,12 @@ const GLOSSARIO: Record<string, Explicacao> = {
     oQue: "Remove dos dois relatórios as encomendas marcadas como “não recebido” e recalcula tudo.",
     calculo: "Remove quando o “Last Scan Status” OU o “Last Problem Type” é “não recebido” (com ou sem acento). Essas encomendas saem de toda a análise, inclusive das exceções. Ligado por padrão desde 12/10. Pode ser desligado na confirmação da importação ou em Importação e critérios.",
   },
+  nao_recebido_entregue: {
+    titulo: "Não recebido, mas entregue",
+    oQue: "Encomendas registradas como “não recebido” que, mesmo assim, têm indício de entrega.",
+    calculo: "Universo: linhas com “não recebido” no status ou no tipo de problema (antes do filtro). “Indício de entrega” = status de entregue/assinatura OU com Delivery Time preenchido. Atenção: algumas ainda constam “Em rota de entrega” (entram pelo Delivery Time) — por isso a coluna Last Scan Status é mostrada. Separadas em com e sem Delivery Time.",
+    acao: "É visibilidade, não cobrança: o registro de não recebimento já foi feito. Use para investigar o comportamento dos entregadores.",
+  },
   a_entregar: { titulo: "Encomendas a entregar", oQue: "Lista das pendentes navegável por cidade e depois por entregador." },
   // ---------- incluídos em 11/10 ----------
   tempo_rota: {

@@ -1,13 +1,13 @@
 // Estado da aplicação e navegação. Um único objeto, alterado por `atualizar`,
 // seguido de nova renderização. Filtros são LOCAIS por tela (como no MVP).
 
-type Tela = "importar" | "torre" | "piso" | "excecoes" | "pendencias" | "entregadores" | "historico" | "mapa" | "a-entregar" | "mudancas" | "fora" | "regras" | "criterios";
+type Tela = "importar" | "torre" | "piso" | "excecoes" | "pendencias" | "entregadores" | "historico" | "mapa" | "a-entregar" | "mudancas" | "fora" | "regras" | "criterios" | "nao-recebido" | "estudo";
 
 interface SelecaoGrafico { dim: "cidade" | "entregador" | "faixa" | "problema" | "classe" | "rota"; valor: string; rotulo: string }
 
-interface FiltrosPend { cidades: string[]; classes: string[]; faixas: string[]; rota: string[]; dias: string[]; soProblema: boolean; semEntregador: boolean; sel: SelecaoGrafico | null }
-interface FiltrosPiso { tipos: string[]; cidades: string[]; entregadores: string[]; vista?: "tabela" | "roteiro" }
-interface FiltrosExc { aba: TipoExcecao | "justificados"; cidades: string[]; entregadores: string[] }
+interface FiltrosPend { cidades: string[]; bairros: string[]; classes: string[]; faixas: string[]; rota: string[]; dias: string[]; soProblema: boolean; semEntregador: boolean; sel: SelecaoGrafico | null }
+interface FiltrosPiso { tipos: string[]; cidades: string[]; bairros: string[]; entregadores: string[]; vista?: "tabela" | "roteiro" }
+interface FiltrosExc { aba: TipoExcecao | "justificados"; cidades: string[]; bairros: string[]; entregadores: string[] }
 interface FiltrosEnt { dias: string[]; ordem: "total" | "pct_desc" | "pct_asc" | "anormal" | "pendente" | "rua"; sel: { entregador: string; classe: string | null } | null; realce: string | null }
 
 type RefAwb =
@@ -16,9 +16,9 @@ type RefAwb =
   | { fonte: "fora_atual" | "fora_base"; dados: Dados };
 
 const filtrosVazios = () => ({
-  pendencias: { cidades: [], classes: [], faixas: [], rota: [], dias: [], soProblema: false, semEntregador: false, sel: null } as FiltrosPend,
-  piso: { tipos: [], cidades: [], entregadores: [] } as FiltrosPiso,
-  excecoes: { aba: "devolucao", cidades: [], entregadores: [] } as FiltrosExc,
+  pendencias: { cidades: [], bairros: [], classes: [], faixas: [], rota: [], dias: [], soProblema: false, semEntregador: false, sel: null } as FiltrosPend,
+  piso: { tipos: [], cidades: [], bairros: [], entregadores: [] } as FiltrosPiso,
+  excecoes: { aba: "devolucao", cidades: [], bairros: [], entregadores: [] } as FiltrosExc,
   entregadores: { dias: [], ordem: "total", sel: null, realce: null } as FiltrosEnt,
   aEntregar: { cidade: "", entregador: "" },
   mudancas: { aba: "provavel_entrega" as "provavel_entrega" | "possivel_devolucao" | "novas" | "status" },
@@ -39,7 +39,11 @@ const E = {
     ordem: null as Analise["ordem"] | null, processando: false, etapas: [] as { texto: string; feito: boolean }[],
     erroGeral: null as ProblemaArquivo | null,
     editandoRef: false,
+    modo: "completa" as "completa" | "piso1",
   },
+  // Verdadeiro quando a análise atual veio do modo "conferir piso de 1 tabela"
+  // (base == atual): só a Conferência de piso faz sentido.
+  pisoUnico: false,
   params: { ignorar_descarregado: true, ignorar_nao_recebido: true, limiar_ruido: 3, cidades_ignoradas: [], referencia_backlog: null } as ParametrosAnalise,
   f: filtrosVazios(),
   drawer: null as string | null,
@@ -50,6 +54,14 @@ const E = {
   historico: [] as RegistroImportacao[],
   mapa: { cidade: "", cor: "situacao" as "situacao" | "espera" | "rota", modo: "mapa" as "mapa" | "esquema" },
   overrides: { por_cidade: {}, cidades_ignoradas: [] } as Overrides,
+  estudo: {
+    arquivo: null as ValidacaoArquivo | null, lendo: false, erro: null as ProblemaArquivo | null,
+    limiar: 10, mapa: null as MapaRegiao | null, processando: false, aba: "cep" as "cep" | "entregador",
+  },
+  // Mapa de região ATIVO usado pela Conferência de piso (null = regra derivada da base).
+  // Padrão: regras_regiao.json publicado; a tela de Estudo pode substituir na sessão.
+  mapaRegiaoAtivo: null as MapaRegiao | null,
+  mapaRegiaoOrigem: "" as "" | "github" | "sessao",
 };
 
 let renderizar: () => void = () => {};
@@ -59,6 +71,7 @@ const TITULOS: Record<Tela, string> = {
   importar: "Nova importação", torre: "Torre de controle", piso: "Conferência de piso", excecoes: "Exceções",
   pendencias: "Pendências", entregadores: "Entregadores", historico: "Histórico", mapa: "Mapa", "a-entregar": "Encomendas a entregar", mudancas: "O que mudou",
   fora: "Fora da jurisdição", regras: "Regras de abrangência", criterios: "Importação e critérios",
+  "nao-recebido": "Não recebido, mas entregue", estudo: "Estudo de regiões",
 };
 
 function navegar(tela: Tela, opts: { prep?: () => void; de?: Tela } = {}) {
@@ -94,7 +107,7 @@ function contar<T>(itens: T[], chave: (x: T) => string | null): { rotulo: string
   for (const i of itens) { const k = chave(i); if (k === null) continue; m.set(k, (m.get(k) || 0) + 1); }
   return [...m].map(([rotulo, valor]) => ({ rotulo, valor })).sort((a, b) => b.valor - a.valor || (a.rotulo < b.rotulo ? -1 : 1));
 }
-const unicos = (xs: (string | null | undefined)[]) => [...new Set(xs.filter((x): x is string => !!x))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+const unicos = (xs: (string | null | undefined)[]) => [...new Set(xs.filter((x): x is string => x !== null && x !== undefined && String(x).trim() !== "").map((x) => String(x)))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 // Tempo em rota = desde a saída para entrega (Delivery Time) até a referência.
 const FAIXAS_ROTA = ["Menos de 12 h", "12 a 24 h", "Mais de 24 h", "Sem saída registrada"];
 const TOM_ROTA: Record<string, Tom> = { "Menos de 12 h": "ok", "12 a 24 h": "atencao", "Mais de 24 h": "critico", "Sem saída registrada": "neutro" };

@@ -21,6 +21,9 @@ interface Servico {
   justificar(awb: string, j: Omit<Justificativa, "criada_em">): Promise<Record<string, Justificativa>>;
   reativar(awb: string): Promise<Record<string, Justificativa>>;
   simular(atual: ConfigRegras, novo: ConfigRegras): Promise<Simulacao>;
+  // Modo Estudo/Validação por região (CEP). Operam sobre uma planilha só.
+  derivarRegiao(arquivo: ValidacaoArquivo, limiar: number): Promise<MapaRegiao>;
+  validarRegiao(arquivo: ValidacaoArquivo, mapa: MapaRegiao): Promise<ErroRegiaoReg[]>;
   listarImportacoes(): Promise<RegistroImportacao[]>;
   registrarImportacao(r: RegistroImportacao): Promise<RegistroImportacao[]>;
 }
@@ -56,7 +59,14 @@ class ServicoApi implements Servico {
     if (!r.ok) throw new ErroServico(corpo && corpo.titulo ? corpo : problemaDe(null));
     return corpo as T;
   }
-  receber(arquivo: File) { const f = new FormData(); f.append("arquivo", arquivo); return this.req<ValidacaoArquivo>("/api/arquivos", { method: "POST", body: f }); }
+  private tabelasRegiao = new Map<string, Tabela>();
+  async receber(arquivo: File) {
+    const f = new FormData(); f.append("arquivo", arquivo);
+    const info = await this.req<ValidacaoArquivo>("/api/arquivos", { method: "POST", body: f });
+    // guarda uma cópia local parseada para o Modo Estudo/Validação (cálculo client-side)
+    if (info.token) { try { this.tabelasRegiao.set(info.token, await lerPlanilhaXlsx(await arquivo.arrayBuffer())); } catch { /* ignora */ } }
+    return info;
+  }
   exemplos() { return this.req<{ base: ValidacaoArquivo; atual: ValidacaoArquivo }>("/api/exemplos", { method: "POST" }); }
   private json(m: string, corpo: unknown): RequestInit { return { method: m, headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) }; }
   verificarOrdem(b: ValidacaoArquivo, a: ValidacaoArquivo) { return this.req<Analise["ordem"]>("/api/ordem", this.json("POST", { token_base: b.token, token_atual: a.token })); }
@@ -72,6 +82,13 @@ class ServicoApi implements Servico {
   simular(atual: ConfigRegras, novo: ConfigRegras) { return this.req<Simulacao>(`/api/analises/${this.idAnalise}/simular-regras`, this.json("POST", { atual, novo })); }
   listarImportacoes() { return this.req<RegistroImportacao[]>("/api/historico"); }
   registrarImportacao(r: RegistroImportacao) { return this.req<RegistroImportacao[]>("/api/historico", this.json("POST", r)); }
+  private tabelaRegiao(a: ValidacaoArquivo): Tabela {
+    const t = a.token ? this.tabelasRegiao.get(a.token) : null;
+    if (!t) throw new ErroServico({ titulo: "Arquivo não encontrado", significado: "O arquivo não está mais carregado nesta página.", acao: "Envie a planilha novamente." });
+    return t;
+  }
+  async derivarRegiao(a: ValidacaoArquivo, limiar: number) { return derivarRegiaoLocal(prepRegiao(this.tabelaRegiao(a)), limiar); }
+  async validarRegiao(a: ValidacaoArquivo, mapa: MapaRegiao) { return validarRegiaoLocal(prepRegiao(this.tabelaRegiao(a)), mapa); }
 }
 
 // ---------- Local ----------
@@ -247,6 +264,12 @@ class ServicoLocal implements Servico {
   }
   listarImportacoes() { return this.repo.lerHistorico(); }
   registrarImportacao(r: RegistroImportacao) { return this.repo.gravarImportacao(r); }
+  async derivarRegiao(arquivo: ValidacaoArquivo, limiar: number) {
+    return derivarRegiaoLocal(prepRegiao(this.tabela(arquivo)), limiar);
+  }
+  async validarRegiao(arquivo: ValidacaoArquivo, mapa: MapaRegiao) {
+    return validarRegiaoLocal(prepRegiao(this.tabela(arquivo)), mapa);
+  }
 }
 
 async function criarServico(): Promise<Servico> {

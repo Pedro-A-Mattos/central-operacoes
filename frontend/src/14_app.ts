@@ -9,6 +9,7 @@ const NAV: { grupo: string; itens: { tela: Tela; rotulo: string; icone: string; 
   { grupo: "Monitorar", itens: [
     { tela: "pendencias", rotulo: "Pendências", icone: "pendencias" },
     { tela: "entregadores", rotulo: "Entregadores", icone: "entregador" },
+    { tela: "nao-recebido", rotulo: "Não recebido, mas entregue", icone: "alerta" },
     { tela: "historico", rotulo: "Histórico", icone: "relogio" },
     { tela: "mapa", rotulo: "Mapa", icone: "mapa" },
   ] },
@@ -16,6 +17,7 @@ const NAV: { grupo: string; itens: { tela: Tela; rotulo: string; icone: string; 
     { tela: "a-entregar", rotulo: "Encomendas a entregar", icone: "lista" },
     { tela: "mudancas", rotulo: "O que mudou", icone: "mudou" },
     { tela: "fora", rotulo: "Fora da jurisdição", icone: "fora" },
+    { tela: "estudo", rotulo: "Estudo de regiões", icone: "regras" },
     { tela: "regras", rotulo: "Regras de abrangência", icone: "regras" },
     { tela: "criterios", rotulo: "Importação e critérios", icone: "config" },
   ] },
@@ -56,16 +58,27 @@ function barraBusca(): HTMLElement {
 
 function lateral(): HTMLElement {
   const a = E.analise;
+  // Telas que funcionam sem uma análise base × atual carregada.
+  const SEM_ANALISE: Tela[] = ["estudo"];
+  // No modo "conferir piso de 1 tabela", telas que fazem sentido com 1 planilha.
+  const PISO1_LIBERADAS: Tela[] = ["piso", "pendencias", "mapa", "fora", "nao-recebido", "estudo"];
   return h("nav", { class: "lateral" + (E.menuAberto ? " aberta" : ""), "aria-label": "Navegação principal" },
     h("div", { class: "marca" }, h("span", { class: "marca-sinal", "aria-hidden": "true" }), h("span", null, h("strong", null, "Central de Operações"), h("small", null, "Distribuição de encomendas"))),
-    a ? NAV.map((g) => h("div", { class: "nav-grupo" },
+    !a ? h("p", { class: "nav-vazio" }, "Importe os relatórios para liberar as análises. O ", h("strong", null, "Estudo de regiões"), " já pode ser usado agora.") : null,
+    E.pisoUnico ? h("p", { class: "nav-vazio" }, "Modo ", h("strong", null, "conferir piso de 1 tabela"), ".") : null,
+    NAV.map((g) => h("div", { class: "nav-grupo" },
       g.grupo ? h("p", { class: "nav-rot" }, g.grupo) : null,
       h("ul", null, g.itens.map((it) => {
-        const b = it.badge ? it.badge() : null;
+        const liberado = (!!a || SEM_ANALISE.includes(it.tela)) && (!E.pisoUnico || PISO1_LIBERADAS.includes(it.tela));
+        const b = liberado && it.badge ? it.badge() : null;
+        if (!liberado) {
+          return h("li", null, h("span", { class: "nav-item desabilitado", "aria-disabled": "true", title: E.pisoUnico ? "Modo conferir piso de 1 tabela: só a conferência de piso" : "Disponível após importar os relatórios" },
+            icone(it.icone), h("span", null, it.rotulo)));
+        }
         return h("li", null, h("a", { href: "#" + it.tela, class: "nav-item" + (E.tela === it.tela ? " ativo" : ""), "aria-current": E.tela === it.tela ? "page" : null,
           on: { click: (e: Event) => { e.preventDefault(); navegar(it.tela); } } },
           icone(it.icone), h("span", null, it.rotulo), b && b.n ? h("span", { class: "nav-badge tom-" + b.tom, "aria-label": `${b.n} pendentes de ação` }, fmtN(b.n)) : null));
-      })))) : h("p", { class: "nav-vazio" }, "Importe os relatórios para liberar as análises."),
+      })))),
     h("div", { class: "nav-rodape" },
       h("button", { type: "button", class: "btn btn-sec largo", on: { click: () => navegar("importar") } }, icone("importar", "ic ic-sm"), "Nova importação"),
       E.servico ? h("p", { class: "modo" }, h("span", { class: "ponto ponto-" + E.servico.modo }), E.servico.modo === "python" ? "Motor Python conectado" : "Processamento neste navegador") : null));
@@ -83,7 +96,12 @@ function topo(): HTMLElement {
 }
 
 function telaAtual(): HTMLElement {
-  if (!E.analise && E.tela !== "importar") E.tela = "importar";
+  // estudo e validar são ferramentas de 1 planilha, funcionam sem análise base × atual.
+  const SEM_ANALISE_OK: Tela[] = ["importar", "estudo"];
+  if (!E.analise && !SEM_ANALISE_OK.includes(E.tela)) E.tela = "importar";
+  // No modo "conferir piso de 1 tabela", só as telas que fazem sentido com 1 planilha.
+  const PISO1_OK: Tela[] = ["importar", "estudo", "piso", "pendencias", "mapa", "fora", "nao-recebido"];
+  if (E.analise && E.pisoUnico && !PISO1_OK.includes(E.tela)) E.tela = "piso";
   switch (E.tela) {
     case "importar": return telaImportar();
     case "torre": return telaTorre();
@@ -98,6 +116,8 @@ function telaAtual(): HTMLElement {
     case "fora": return telaFora();
     case "regras": return telaRegras();
     case "criterios": return telaCriterios();
+    case "nao-recebido": return telaNaoRecebido();
+    case "estudo": return telaEstudo();
   }
 }
 
@@ -160,6 +180,8 @@ async function iniciar() {
   E.servico = await criarServico();
   E.iniciando = false;
   E.servico.listarImportacoes().then((h) => atualizar(() => { E.historico = h; })).catch(() => {});
+  // mapa de região padrão (regras_regiao.json publicado) para a conferência de piso
+  carregarMapaRegiaoPublicado().then((m) => { if (m && (Object.keys(m.por_cep).length || Object.keys(m.por_cidade).length)) atualizar(() => { E.mapaRegiaoAtivo = m; E.mapaRegiaoOrigem = "github"; }); }).catch(() => {});
   const hash = location.hash.replace("#", "") as Tela;
   if (E.servico.modo === "local" && EXEMPLO_EMBUTIDO) {
     E.exemplo = true;

@@ -10,13 +10,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from .comparador import AWB_COL, CIDADE_COL
+from .comparador import AWB_COL, CIDADE_COL, ZIP_COL
 
 AREA_COL = "Consignee Area"
 ENTREGADOR_COL = "Delivery Associate"
 
 LIMIAR_RUIDO = 3
 MIN_ENTREGADORES_URBANO = 3
+LIMIAR_REGIAO = 10  # padrão do Modo Estudo (histórico grande, confiança alta)
 
 ERRO_CIDADE_AUSENTE = "Cidade ausente"
 ERRO_CIDADE_FORA = "Cidade fora da abrangência"
@@ -148,4 +149,140 @@ def validar_piso(pendentes: pd.DataFrame, regras: RegrasAbrangencia,
             erros.append(_erro(linha, ERRO_FORA_AREA,
                                f"{entregador} não costuma entregar em {local}.", validos))
     colunas = list(pendentes.columns) + ["tipo_erro", "detalhe", "entregadores_esperados"]
+    return pd.DataFrame(erros, columns=colunas)
+
+
+# =====================================================================
+# Modo Estudo / Validação por REGIÃO (CEP), independente da conferência
+# de piso acima. F1 deriva o mapa região->entregadores; F2 valida uma
+# planilha contra esse mapa. Fallback: CEP -> bairro -> cidade.
+# =====================================================================
+
+ERRO_REGIAO_FORA = "Entregador fora da região"
+ERRO_REGIAO_SEM_ENTREGADOR = "Sem entregador"
+ERRO_REGIAO_SEM_REGRA = "Região sem regra conhecida"
+
+
+def canon_cep(v) -> str | None:
+    """Normaliza o CEP para só dígitos (ex.: '38613-394' -> '38613394').
+    Mantém como chave estável; devolve None se não houver dígitos."""
+    s = _txt(v)
+    if s is None:
+        return None
+    digitos = "".join(ch for ch in s if ch.isdigit())
+    return digitos or None
+
+
+def derivar_regras_regiao(base: pd.DataFrame, limiar: int = LIMIAR_REGIAO) -> dict:
+    """F1: mapa de atendimento por região a partir de um histórico grande.
+    Guarda por CEP, por bairro (cidade|bairro) e por cidade — todos os
+    entregadores com >= limiar entregas, mais o dominante de cada região.
+    Permite múltiplos entregadores por região (alta demanda)."""
+    cols = [c for c in (ZIP_COL, AREA_COL, CIDADE_COL, ENTREGADOR_COL) if c in base.columns]
+    df = base[cols].copy()
+    for c in cols:
+        df[c] = df[c].map(_txt)
+    if ENTREGADOR_COL not in df.columns:
+        return {"limiar": int(limiar), "por_cep": {}, "por_bairro": {}, "por_cidade": {}}
+    df = df.dropna(subset=[ENTREGADOR_COL])
+
+    por_cep: dict[str, list[str]] = {}
+    if ZIP_COL in df.columns:
+        d = df.copy()
+        d["_cep"] = d[ZIP_COL].map(canon_cep)
+        d = d.dropna(subset=["_cep"])
+        for cep, g in d.groupby("_cep"):
+            validos = _conjunto_valido(g[ENTREGADOR_COL].value_counts(), limiar)
+            if validos:
+                por_cep[cep] = sorted(validos)
+
+    por_bairro: dict[str, list[str]] = {}
+    if AREA_COL in df.columns and CIDADE_COL in df.columns:
+        d = df.dropna(subset=[AREA_COL, CIDADE_COL])
+        for (cidade, bairro), g in d.groupby([CIDADE_COL, AREA_COL]):
+            validos = _conjunto_valido(g[ENTREGADOR_COL].value_counts(), limiar)
+            if validos:
+                por_bairro[f"{cidade}|{bairro}"] = sorted(validos)
+
+    por_cidade: dict[str, list[str]] = {}
+    if CIDADE_COL in df.columns:
+        d = df.dropna(subset=[CIDADE_COL])
+        for cidade, g in d.groupby(CIDADE_COL):
+            validos = _conjunto_valido(g[ENTREGADOR_COL].value_counts(), limiar)
+            if validos:
+                por_cidade[cidade] = sorted(validos)
+
+    return {"limiar": int(limiar),
+            "por_cep": {k: por_cep[k] for k in sorted(por_cep)},
+            "por_bairro": {k: por_bairro[k] for k in sorted(por_bairro)},
+            "por_cidade": {k: por_cidade[k] for k in sorted(por_cidade)}}
+
+
+def _validos_regiao(mapa: dict, cep, bairro, cidade) -> tuple[set[str], str, bool]:
+    """Resolve a regra para uma linha com fallback CEP -> bairro -> cidade.
+    Retorna (conjunto, escopo, tem_regra)."""
+    c = canon_cep(cep)
+    if c and c in (mapa.get("por_cep") or {}):
+        return set(mapa["por_cep"][c]), "cep", True
+    b = _txt(bairro)
+    ci = _txt(cidade)
+    if ci and b and f"{ci}|{b}" in (mapa.get("por_bairro") or {}):
+        return set(mapa["por_bairro"][f"{ci}|{b}"]), "bairro", True
+    if ci and ci in (mapa.get("por_cidade") or {}):
+        return set(mapa["por_cidade"][ci]), "cidade", True
+    return set(), "regiao", False
+
+
+def validar_regiao(df: pd.DataFrame, mapa: dict) -> pd.DataFrame:
+    """F2: audita a atribuição de cada linha contra o mapa de regiões.
+    Aponta 'sem entregador', 'fora da região' e 'região sem regra'."""
+    erros = []
+    for _, linha in df.iterrows():
+        validos, escopo, tem_regra = _validos_regiao(
+            mapa, linha.get(ZIP_COL), linha.get(AREA_COL), linha.get(CIDADE_COL))
+        entregador = _txt(linha.get(ENTREGADOR_COL))
+        if not tem_regra:
+            d = _erro(linha, ERRO_REGIAO_SEM_REGRA, "Região sem regra no mapeamento; não dá para julgar.", None)
+            d["escopo"] = escopo
+            erros.append(d)
+            continue
+        if not entregador:
+            d = _erro(linha, ERRO_REGIAO_SEM_ENTREGADOR, "Entrega sem entregador atribuído.", validos)
+            d["escopo"] = escopo
+            erros.append(d)
+            continue
+        if entregador not in validos:
+            d = _erro(linha, ERRO_REGIAO_FORA, f"{entregador} não costuma atender esta região.", validos)
+            d["escopo"] = escopo
+            erros.append(d)
+    colunas = list(df.columns) + ["tipo_erro", "detalhe", "entregadores_esperados", "escopo"]
+    return pd.DataFrame(erros, columns=colunas)
+
+
+def validar_piso_por_regiao(pendentes: pd.DataFrame, mapa: dict,
+                            cidades_ignoradas: list[str] | None = None) -> pd.DataFrame:
+    """Conferência de piso usando o MAPA DE REGIÃO (CEP->bairro->cidade). Reaproveita
+    os MESMOS tipos de erro da conferência de piso para a tela não mudar."""
+    ignoradas = set(cidades_ignoradas or [])
+    erros = []
+    for _, linha in pendentes.iterrows():
+        cidade = _txt(linha.get(CIDADE_COL))
+        if cidade in ignoradas:
+            continue
+        validos, escopo, tem_regra = _validos_regiao(
+            mapa, linha.get(ZIP_COL), linha.get(AREA_COL), linha.get(CIDADE_COL))
+        if not tem_regra:
+            d = _erro(linha, ERRO_CIDADE_FORA, "Região (CEP/bairro/cidade) sem regra no mapeamento do estudo.", None)
+        else:
+            entregador = _txt(linha.get(ENTREGADOR_COL))
+            if not entregador:
+                d = _erro(linha, ERRO_SEM_ENTREGADOR, "Peça sem entregador atribuído.", validos)
+            elif entregador not in validos:
+                d = _erro(linha, ERRO_FORA_AREA, f"{entregador} não costuma atender esta região.", validos)
+            else:
+                continue
+        d["escopo"] = escopo
+        d["origem_regra"] = "mapa de região"
+        erros.append(d)
+    colunas = list(pendentes.columns) + ["tipo_erro", "detalhe", "entregadores_esperados", "escopo", "origem_regra"]
     return pd.DataFrame(erros, columns=colunas)

@@ -94,11 +94,30 @@ const VALORES_NAO_RECEBIDO = new Set(["não recebido", "nao recebido"]);
 // Remove quando "não recebido" aparece no Last Scan Status OU no Last Problem Type.
 const filtroNaoRecebido = (df: Dados[], ligado: boolean) =>
   ligado ? df.filter((r) => !VALORES_NAO_RECEBIDO.has(minus(r[STATUS]).trim()) && !VALORES_NAO_RECEBIDO.has(minus(r[PROB]).trim())) : df;
+// "Não recebido, com indício de entrega": do atual bruto (antes dos filtros).
+// Indício = entrega confirmada (status/assinatura) OU Delivery Time preenchido.
+function naoRecebidoComEntrega(ult: Dados[]): { dados: Dados; categoria: string; confirmada: boolean }[] {
+  const out: { dados: Dados; categoria: string; confirmada: boolean }[] = [];
+  for (const r of ult) {
+    const ehNr = VALORES_NAO_RECEBIDO.has(minus(r[STATUS]).trim()) || VALORES_NAO_RECEBIDO.has(minus(r[PROB]).trim());
+    if (!ehNr) continue;
+    const conf = entregaConfirmada(r);
+    const temDt = temValor(r[DELIV_TIME]);
+    if (!conf && !temDt) continue;
+    out.push({ dados: contrato(r), categoria: temDt ? "Com Delivery Time" : "Sem Delivery Time", confirmada: conf });
+  }
+  return out;
+}
 const removerFm = (df: Dados[]) => df.filter((r) => !ehFm(r[PROB]));
 function separarFora(df: Dados[]): [Dados[], Dados[]] {
   const d: Dados[] = [], f: Dados[] = [];
   for (const r of df) (txt(r[CIDADE]) ? d : f).push(r);
   return [d, f];
+}
+// Pré-processamento para o estudo/validação de regiões: normaliza, remove força
+// maior e descarta linhas sem cidade (idêntico ao backend que gerou o mapa padrão).
+function prepRegiao(t: Tabela): Dados[] {
+  return separarFora(removerFm(normalizarRelatorio(t)))[0];
 }
 const diasDisponiveis = (df: Dados[]) =>
   [...new Set(df.map((r) => paraData(r[CHEGADA])).filter((d): d is Date => !!d).map(diaIso))].sort();
@@ -171,6 +190,65 @@ function derivarRegras(base: Dados[], limiar: number): Regras {
   return rg;
 }
 
+// ---------- Modo Estudo / Validação por REGIÃO (CEP) — espelha regras.py ----------
+const ZIP = "Consignee Zip Code";
+const LIMIAR_REGIAO_PADRAO = 10;
+
+function canonCep(v: Valor | undefined): string | null {
+  const s = txt(v);
+  if (s === null) return null;
+  const d = s.replace(/\D/g, "");
+  return d || null;
+}
+function contarPor(rows: Dados[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const r of rows) { const e = txt(r[ENTREG]); if (!e) continue; m.set(e, (m.get(e) || 0) + 1); }
+  return m;
+}
+function derivarRegiaoLocal(base: Dados[], limiar: number): MapaRegiao {
+  const com = base.filter((r) => txt(r[ENTREG]));
+  const porCep: Record<string, string[]> = {};
+  const grpCep = new Map<string, Dados[]>();
+  for (const r of com) { const c = canonCep(r[ZIP]); if (!c) continue; (grpCep.get(c) || grpCep.set(c, []).get(c)!).push(r); }
+  for (const [c, rows] of grpCep) { const v = conjuntoValido(contarPor(rows), limiar); if (v.size) porCep[c] = [...v].sort(); }
+  const porBairro: Record<string, string[]> = {};
+  const grpB = new Map<string, Dados[]>();
+  for (const r of com) { const ci = txt(r[CIDADE]), b = txt(r[AREA]); if (!ci || !b) continue; const k = ci + "|" + b; (grpB.get(k) || grpB.set(k, []).get(k)!).push(r); }
+  for (const [k, rows] of grpB) { const v = conjuntoValido(contarPor(rows), limiar); if (v.size) porBairro[k] = [...v].sort(); }
+  const porCidade: Record<string, string[]> = {};
+  const grpC = new Map<string, Dados[]>();
+  for (const r of com) { const ci = txt(r[CIDADE]); if (!ci) continue; (grpC.get(ci) || grpC.set(ci, []).get(ci)!).push(r); }
+  for (const [ci, rows] of grpC) { const v = conjuntoValido(contarPor(rows), limiar); if (v.size) porCidade[ci] = [...v].sort(); }
+  const ordenar = (o: Record<string, string[]>): Record<string, string[]> => {
+    const out: Record<string, string[]> = {};
+    for (const k of Object.keys(o).sort()) out[k] = o[k];
+    return out;
+  };
+  return { limiar: Math.round(limiar), por_cep: ordenar(porCep), por_bairro: ordenar(porBairro), por_cidade: ordenar(porCidade) };
+}
+interface ErroRegiao extends ErroRegiaoReg {}
+const ERRO_REG_FORA = "Entregador fora da região", ERRO_REG_SEM_ENT = "Sem entregador", ERRO_REG_SEM_REGRA = "Região sem regra conhecida";
+function validosRegiao(mapa: MapaRegiao, cep: Valor | undefined, bairro: Valor | undefined, cidade: Valor | undefined): [Set<string>, string, boolean] {
+  const c = canonCep(cep);
+  if (c && mapa.por_cep[c]) return [new Set(mapa.por_cep[c]), "cep", true];
+  const b = txt(bairro), ci = txt(cidade);
+  if (ci && b && mapa.por_bairro[ci + "|" + b]) return [new Set(mapa.por_bairro[ci + "|" + b]), "bairro", true];
+  if (ci && mapa.por_cidade[ci]) return [new Set(mapa.por_cidade[ci]), "cidade", true];
+  return [new Set(), "regiao", false];
+}
+function validarRegiaoLocal(rows: Dados[], mapa: MapaRegiao): ErroRegiao[] {
+  const out: ErroRegiao[] = [];
+  for (const r of rows) {
+    const [validos, escopo, temRegra] = validosRegiao(mapa, r[ZIP], r[AREA], r[CIDADE]);
+    const ent = txt(r[ENTREG]);
+    const base = { awb: String(r[AWB]), dados: r, esperados: [...validos].sort(), escopo };
+    if (!temRegra) out.push({ ...base, tipo: ERRO_REG_SEM_REGRA, detalhe: "Região sem regra no mapeamento; não dá para julgar." });
+    else if (!ent) out.push({ ...base, tipo: ERRO_REG_SEM_ENT, detalhe: "Entrega sem entregador atribuído." });
+    else if (!validos.has(ent)) out.push({ ...base, tipo: ERRO_REG_FORA, detalhe: `${ent} não costuma atender esta região.` });
+  }
+  return out;
+}
+
 function aplicarOverrides(rg: Regras, ov: Overrides): Regras {
   for (const [c, ents] of Object.entries(ov.por_cidade || {})) {
     rg.porCidade.set(c, new Set(ents)); rg.urbanas.delete(c); rg.origem.set(c, "ajuste manual");
@@ -181,6 +259,24 @@ function aplicarOverrides(rg: Regras, ov: Overrides): Regras {
 function validos(rg: Regras, c: string, b: string | null): [Set<string>, "bairro" | "cidade"] {
   if (rg.urbanas.has(c) && b && rg.porBairro.has(chaveBairro(c, b))) return [rg.porBairro.get(chaveBairro(c, b))!, "bairro"];
   return [rg.porCidade.get(c) || new Set(), "cidade"];
+}
+
+// Conferência de piso usando o MAPA DE REGIÃO (CEP->bairro->cidade), quando houver.
+// Reaproveita os mesmos tipos de erro da conferência de piso para a tela não mudar.
+function validarPisoPorRegiao(pend: Dados[], mapa: MapaRegiao, ignoradas: string[]): Map<string, ErroPiso> {
+  const ign = new Set(ignoradas); const out = new Map<string, ErroPiso>();
+  for (const r of pend) {
+    const c = txt(r[CIDADE]);
+    if (c !== null && ign.has(c)) continue;
+    const awb = r[AWB] as string;
+    const [validos, escopo, temRegra] = validosRegiao(mapa, r[ZIP], r[AREA], r[CIDADE]);
+    const esperados = [...validos].sort();
+    if (!temRegra) { out.set(awb, { tipo: "Cidade fora da abrangência", detalhe: "Região (CEP/bairro/cidade) sem regra no mapeamento do estudo.", esperados: [], escopo: escopo as ErroPiso["escopo"], origem_regra: "mapa de região" }); continue; }
+    const e = txt(r[ENTREG]);
+    if (!e) { out.set(awb, { tipo: "Sem entregador", detalhe: "Peça sem entregador atribuído.", esperados, escopo: escopo as ErroPiso["escopo"], origem_regra: "mapa de região" }); continue; }
+    if (!validos.has(e)) { out.set(awb, { tipo: "Entregador fora da área", detalhe: `${e} não costuma atender esta região.`, esperados, escopo: escopo as ErroPiso["escopo"], origem_regra: "mapa de região" }); }
+  }
+  return out;
 }
 
 function validarPiso(pend: Dados[], rg: Regras, ignoradas: string[]): Map<string, ErroPiso> {
@@ -383,7 +479,7 @@ function analisarLocal(tb: Tabela, tu: Tabela, p: ParametrosAnalise, ov: Overrid
   const limiar = Math.max(1, Math.min(20, Math.round(p.limiar_ruido || LIMIAR_RUIDO_PADRAO)));
   const rg = aplicarOverrides(derivarRegras(baseF, limiar), ov);
   const ignoradas = [...new Set([...(ov.cidades_ignoradas || []), ...(p.cidades_ignoradas || [])])];
-  const erros = validarPiso(res.pendentes, rg, ignoradas);
+  const erros = p.mapa_regiao ? validarPisoPorRegiao(res.pendentes, p.mapa_regiao, ignoradas) : validarPiso(res.pendentes, rg, ignoradas);
 
   const bIds = new Set(baseF.map((r) => r[AWB] as string));
   const bMap = new Map(baseF.map((r) => [r[AWB] as string, r]));
@@ -433,6 +529,7 @@ function analisarLocal(tb: Tabela, tu: Tabela, p: ParametrosAnalise, ov: Overrid
     atual, sairam,
     mudou_status: res.mudou.map((m) => ({ awb: m.awb, status_base: m.sb, status_atual: m.su })),
     fora: { base: baseFora.map(contrato), atual: ultFora.map(contrato) },
+    nao_recebido_entregue: naoRecebidoComEntrega(ult),
     regras: { por_cidade: porCidade, por_bairro: porBairro, cidades_ignoradas: ignoradas },
     dias_chegada: diasDisponiveis(ultF),
     dias_chegada_entregadores: [...new Set([...diasDisponiveis(baseF), ...diasDisponiveis(ultF)])].sort(),
