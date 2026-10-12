@@ -6,6 +6,8 @@ por ele — os testes em tests/test_criterios_aceite.py valem para os dois.
 """
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -17,7 +19,23 @@ MOTIVO_COL = "Last Problem Reason"
 CIDADE_COL = "Consignee City"
 CHEGADA_COL = "Arrival Time"
 
-VALORES_FM = {"ocorrênia fm", "ocorrencia fm", "force majeure"}
+# Força maior no Last Problem Type. A iMile usa pelo menos duas grafias:
+# "Ocorrênia FM" (com erro de digitação) e "Force majeure". A detecção é por
+# conteúdo (texto sem acento) para cobrir as duas e variações futuras:
+#  - contém "force majeure" ou "forca maior"; ou
+#  - traz a sigla "fm" como palavra isolada (p.ex. "ocorrenia fm", "fm").
+VALORES_FM = {"ocorrênia fm", "ocorrencia fm", "force majeure"}  # mantido p/ referência
+_RE_FM = re.compile(r"(?:\bfm\b|force\s*majeure|forca\s+maior)")
+
+
+def _canon_fm(v) -> str:
+    s = unicodedata.normalize("NFKD", str(v)).encode("ascii", "ignore").decode()
+    return re.sub(r"\s+", " ", s.lower()).strip()
+
+
+def _serie_eh_fm(serie: pd.Series) -> pd.Series:
+    canon = serie.astype("string").map(lambda x: _canon_fm(x) if x is not None else "")
+    return canon.map(lambda s: bool(_RE_FM.search(s)))
 PALAVRAS_DEVOLUCAO = ("devol", "não recebido", "nao recebido", "recusad", "retorno")
 
 
@@ -66,11 +84,11 @@ def aplicar_filtro_nao_recebido(df: pd.DataFrame, ligado: bool) -> pd.DataFrame:
 
 
 def remover_fm(df: pd.DataFrame) -> pd.DataFrame:
-    """RN-008: remove força maior de toda a análise (sempre)."""
+    """RN-008: remove força maior de toda a análise (sempre). Reconhece as duas
+    grafias da iMile — 'Ocorrênia FM' e 'Force majeure' — e variações."""
     if PROBLEMA_COL not in df.columns:
         return df
-    tipo = df[PROBLEMA_COL].astype("string").str.strip().str.lower()
-    return df[~tipo.isin(VALORES_FM).fillna(False)].reset_index(drop=True)
+    return df[~_serie_eh_fm(df[PROBLEMA_COL]).fillna(False)].reset_index(drop=True)
 
 
 def separar_fora_jurisdicao(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:

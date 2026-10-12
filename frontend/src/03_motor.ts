@@ -11,7 +11,13 @@ const RE_HORARIO_NOME = /(\d{4})-(\d{2})-(\d{2})[T_ ](\d{2})[:h-]?(\d{2})[:m-]?(
 // OP-02: motivos que caracterizam ausência ou recusa (espelha excecoes.MOTIVOS_DEVOLUCAO)
 const MOTIVOS_DEVOLUCAO = ["não recebido", "nao recebido", "local fechado", "telefone não atendido", "telefone nao atendido", "telefone errado", "recusad", "ausente"];
 
-const VALORES_FM = new Set(["ocorrênia fm", "ocorrencia fm", "force majeure"]);
+const VALORES_FM = new Set(["ocorrênia fm", "ocorrencia fm", "force majeure"]); // referência
+// Força maior: duas grafias da iMile ("Ocorrênia FM" e "Force majeure") e variações.
+// Detecção por conteúdo, sem acento: "force majeure"/"forca maior" ou "fm" isolado.
+const RE_FM = /(?:\bfm\b|force\s*majeure|forca\s+maior)/;
+const canonFm = (v: Valor | undefined): string =>
+  (v === null || v === undefined ? "" : String(v)).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+const ehFm = (v: Valor | undefined): boolean => RE_FM.test(canonFm(v));
 const PALAVRAS_DEVOLUCAO = ["devol", "não recebido", "nao recebido", "recusad", "retorno"];
 const PALAVRAS_EXTRAVIO = ["lost", "extravi"];
 const STATUS_ENTREGUE = new Set(["entregue", "assinado", "signed", "delivered"]);
@@ -87,7 +93,7 @@ const filtroDescarregado = (df: Dados[], ligado: boolean) =>
 const VALORES_NAO_RECEBIDO = new Set(["não recebido", "nao recebido"]);
 const filtroNaoRecebido = (df: Dados[], ligado: boolean) =>
   ligado ? df.filter((r) => !VALORES_NAO_RECEBIDO.has(minus(r[STATUS]).trim())) : df;
-const removerFm = (df: Dados[]) => df.filter((r) => !VALORES_FM.has(minus(r[PROB]).trim()));
+const removerFm = (df: Dados[]) => df.filter((r) => !ehFm(r[PROB]));
 function separarFora(df: Dados[]): [Dados[], Dados[]] {
   const d: Dados[] = [], f: Dados[] = [];
   for (const r of df) (txt(r[CIDADE]) ? d : f).push(r);

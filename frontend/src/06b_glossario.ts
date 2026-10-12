@@ -231,7 +231,7 @@ const GLOSSARIO: Record<string, Explicacao> = {
   forca_maior: {
     titulo: "Força maior (FM)",
     oQue: "Encomendas com ocorrência de força maior, retiradas de toda a análise.",
-    calculo: "Tipo de problema “Ocorrênia FM”, “Ocorrencia FM” ou “Force majeure”. Sempre removidas, nos dois relatórios.",
+    calculo: "Tipo de problema de força maior — “Ocorrênia FM” e “Force majeure” (as duas grafias usadas pela iMile), além de variações como “FM” ou “Força maior”. Sempre removidas, nos dois relatórios.",
   },
   descarregado: {
     titulo: "Ignorar “descarregado”",

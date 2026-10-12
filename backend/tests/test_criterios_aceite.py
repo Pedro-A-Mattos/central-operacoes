@@ -73,6 +73,23 @@ def test_ca005_remocao_fm():
     assert len(u) - len(cmp.remover_fm(u)) == 119
 
 
+def test_ca005b_remocao_fm_duas_grafias_e_variacoes():
+    # RN-008: 'Ocorrênia FM' e 'Force majeure' (as duas grafias reais da iMile),
+    # além de variações, devem todas ser removidas. Tipos normais ficam.
+    df = pd.DataFrame({
+        "Waybill No": ["1", "2", "3", "4", "5", "6", "7"],
+        "Last Problem Type": ["Ocorrênia FM", "Force majeure", "Ocorrência FM",
+                              "Força maior", "FM", "Não entregue", "Lost package"],
+    })
+    df = cmp.normalizar_relatorio(df)
+    restante = cmp.remover_fm(df)
+    assert list(restante["Waybill No"]) == ["6", "7"]  # só os não-FM sobram
+    # nenhum valor de FM/majeure permanece
+    import re as _re
+    resto = restante["Last Problem Type"].astype("string").dropna().tolist()
+    assert not any(_re.search(r"fm|majeure|maior", v, _re.I) for v in resto)
+
+
 def test_ca006_fora_da_jurisdicao():
     _, u = _base()
     dentro, fora = cmp.separar_fora_jurisdicao(u)
