@@ -38,7 +38,7 @@ const APELIDOS_DICAS: Record<string, string> = {
   "Pendências por localização": "mapa", "Resumo por entregador": "desempenho", "Cidades ignoradas": "cidades_ignoradas",
   "Pendências · tempo em rota": "tempo_rota", "Regra RN-003 · decisão pendente": "entregue_confirmada", "Como a conferência decide": "regra_derivada",
   // colunas gerais
-  "Código (AWB)": "col_awb", "Waybill No": "col_awb", "Chegada ao galpão": "col_chegada", "Tempo em espera": "tempo_espera", "Há quanto tempo em rota": "tempo_rota",
+  "Cidade · bairro": "col_local", "Código (AWB)": "col_awb", "Waybill No": "col_awb", "Chegada ao galpão": "col_chegada", "Tempo em espera": "tempo_espera", "Há quanto tempo em rota": "tempo_rota",
   "Status": "col_status", "Status atual": "col_status", "Último status na base": "col_status", "Last Scan Status": "col_status",
   "Problema": "tipos_problema", "Last Problem Type": "tipos_problema",
   // títulos de gráficos
@@ -53,6 +53,8 @@ const _chaveDica = (s: string) => normalizarBusca(s).replace(/\s+/g, " ");
 // O mesmo texto significa coisas diferentes conforme o lugar: nos chips "Entregue" e "Não entregue" são a classe
 // operacional; nos gráficos, "Não entregue" é um tipo de problema registrado.
 const APELIDOS_POR_CONTEXTO: { seletor: string; mapa: Record<string, string> }[] = [
+  // Conferência de piso: "Problema" é o tipo de erro de piso (nas outras telas é a ocorrência registrada pela transportadora)
+  { seletor: "#ms-pi-tipo .ms-rot, .piso-layout th", mapa: { "Problema": "piso_problema" } },
   { seletor: ".chip", mapa: { "Entregue": "classe_operacional", "Não entregue": "classe_operacional" } },
   { seletor: ".barra-rotulo", mapa: { "Reprogramação": "tipo_reprogramacao", "Não entregue": "tipo_nao_entregue", "Lost package": "tipo_lost", "Avaria": "tipo_avaria" } },
 ];

@@ -505,6 +505,21 @@ const GLOSSARIO: Record<string, Explicacao> = {
     oQue: "Total de códigos únicos do relatório atualizado, antes de qualquer filtro. É o ponto de partida do funil.",
     calculo: "Linhas com código de encomenda; repetidos contam uma vez (vale o registro de evento mais recente).",
   },
+  piso_problema: {
+    titulo: "Problema (conferência de piso)",
+    oQue: "O que está errado na atribuição daquela encomenda: o entregador não é um dos aceitos para a região, ele não aparece no histórico, a região tem pouco histórico, falta entregador ou a cidade está fora da abrangência.",
+    acao: "Passe o mouse sobre a etiqueta de cada linha para ver o significado do tipo e o que fazer. Use o filtro para ver só um tipo.",
+  },
+  col_local: {
+    titulo: "Cidade · bairro",
+    oQue: "Destino da encomenda (cidade e bairro do relatório). É com eles, e com o CEP, que a conferência procura a regra de quem pode entregar ali.",
+  },
+  piso_origem_regra: {
+    titulo: "De onde vem a regra",
+    oQue: "A linha pequena diz em que nível a regra foi encontrada (CEP, bairro ou cidade) e de onde ela vem.",
+    calculo: "“Mapa de região”: aprendida do histórico no Estudo de regiões. “Derivada”: aprendida do relatório base. “Ajuste manual”: definida por você em Regras de abrangência e tem prioridade sobre as outras.",
+    aviso: "Regra aprendida do histórico repete também os erros recorrentes. Confirme antes de corrigir.",
+  },
 };
 
 const AJUDA = { aberta: "" };
