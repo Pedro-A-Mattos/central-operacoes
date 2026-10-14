@@ -193,6 +193,18 @@ conteúdo das colunas e análise completa idênticos, paridade intacta):
 Resultado na tela: envio do arquivo de estudo de **19,9 s para 2,5 s**. DuckDB e Polars não entram: não atacam esse
 gargalo e o volume (dezenas de milhares de linhas) não justifica reescrever o motor, que também existe em TypeScript.
 
+### Avaria e peça sem tentativa (13/10/2026)
+
+Achado no uso: uma peça com **0 tentativas** e problema "Avaria" (nunca saiu do galpão) aparecia em "1 tentativa →
+colocar em rota de novo", porque `insucesso` é "qualquer problema com menos de 3 tentativas" e a lista usava "até 1".
+Corrigido sem mexer na definição de `insucesso` (mantém os totais dos critérios de aceite):
+
+- Nova marca `avaria` em `excecoes` (Python e motor local, em paridade): texto com "avaria"/"danific" e que não é extravio.
+- "1 tentativa" passa a exigir **exatamente 1** tentativa; avaria não entra em 1/2/3 tentativas nem em "Já em rota".
+- Lista própria **Avarias** em Pendências de entrega e alerta na Torre, com a ação "seguir o processo de avaria".
+- Limite conhecido: o relatório não traz o horário de deslacre, então os prazos de 4 h (iMile) e 2 h (Anjun) não são medidos.
+- Peça com 0 tentativas e outro problema (ex.: "Não recebido", que o filtro padrão já remove) não vira "1 tentativa".
+
 ### Continua pendente
 
 - **Grafias de bairro no caminho sem mapa** (§7): unificar mudaria CA-007/008. O caminho com mapa já normaliza.

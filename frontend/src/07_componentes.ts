@@ -39,8 +39,8 @@ function chip(texto: string, tom: Tom = "neutro", ic?: string): HTMLElement {
   return h("span", { class: "chip chip-" + tom }, ic ? icone(ic, "ic ic-xs") : null, texto);
 }
 const TOM_ERRO: Record<string, Tom> = { "Entregador fora da área": "critico", "Sem entregador": "atencao", "Cidade fora da abrangência": "critico", "Cidade ausente": "atencao", "Entregador sem histórico": "atencao", "Região com pouco histórico": "atencao" };
-const ROTULO_EXC: Record<TipoExcecao, string> = { devolucao: "Devolução", extravio: "Extravio", insucesso: "Insucesso", revisar_tentativas: "3+ tentativas, revisar" };
-const TOM_EXC: Record<TipoExcecao, Tom> = { devolucao: "critico", extravio: "critico", insucesso: "atencao", revisar_tentativas: "atencao" };
+const ROTULO_EXC: Record<TipoExcecao, string> = { devolucao: "Devolução", extravio: "Extravio", insucesso: "Insucesso", revisar_tentativas: "3+ tentativas, revisar", avaria: "Avaria" };
+const TOM_EXC: Record<TipoExcecao, Tom> = { devolucao: "critico", extravio: "critico", insucesso: "atencao", revisar_tentativas: "atencao", avaria: "critico" };
 // "regra do CEP", "regra do bairro"... conforme o escopo que decidiu a conferência.
 const ROTULO_ESCOPO: Record<string, string> = { cep: "do CEP", bairro: "do bairro", "cep+bairro": "do CEP e do bairro", cidade: "da cidade" };
 const TOM_FAIXA: Record<string, Tom> = { "0-1 dia": "ok", "2-3 dias": "atencao", "4+ dias": "critico" };

@@ -13,7 +13,7 @@ const APELIDOS_DICAS: Record<string, string> = {
   "0-1 dia": "tempo_espera", "2-3 dias": "tempo_espera", "4+ dias": "tempo_espera", "Sem data": "tempo_espera", "Aguardando": "tempo_espera",
   "Menos de 12 h": "tempo_rota", "12 a 24 h": "tempo_rota", "Mais de 24 h": "tempo_rota", "Sem saída registrada": "tempo_rota", "Em rota há": "tempo_rota",
   // abas e listas
-  "Extravios": "extravio", "Insucessos": "insucesso", "Mudanças de status": "mudou_status", "Roteiro por entregador": "roteiro",
+  "Extravios": "extravio", "Avarias": "avaria", "Seguir o processo de avaria": "avaria", "Insucessos": "insucesso", "Mudanças de status": "mudou_status", "Roteiro por entregador": "roteiro",
   // ações sugeridas (Pendências de entrega)
   "Cobrar a entrega": "atrasadas", "Colocar em rota": "tent1", "Colocar em rota e ver devolução": "tent2", "Iniciar devolução": "tent3",
   "Confirmar devolução (reprogramação)": "tent3", "Investigar extravio": "extravio", "Conferir se está em rota": "ja_em_rota",

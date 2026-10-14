@@ -618,7 +618,7 @@ function analisarLocal(tb: Tabela, tu: Tabela, p: ParametrosAnalise, ov: Overrid
   const atual: RegAtual[] = res.pendentes.map((r) => {
     const a = r[AWB] as string; const dias = backlogDias(r, refFinal); const rota = minutosEmRota(r, refFinal);
     const ex: TipoExcecao[] = [];
-    if (ehDevolucao(r)) ex.push("devolucao"); if (ehExtravio(r)) ex.push("extravio"); if (ehInsucesso(r)) ex.push("insucesso"); if (ehRevisar(r)) ex.push("revisar_tentativas");
+    if (ehDevolucao(r)) ex.push("devolucao"); if (ehExtravio(r)) ex.push("extravio"); if (ehInsucesso(r)) ex.push("insucesso"); if (ehRevisar(r)) ex.push("revisar_tentativas"); if (ehAvaria(r) && !ehExtravio(r)) ex.push("avaria");
     const naBase = bIds.has(a);
     const sb = naBase ? bMap.get(a)![STATUS] : null; const eb = naBase ? bMap.get(a)![ENTREG] : null;
     return {

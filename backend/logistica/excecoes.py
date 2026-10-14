@@ -91,6 +91,11 @@ def extravios(df: pd.DataFrame) -> pd.DataFrame:
     return df[_mask_extravio(df)].copy()
 
 
+def avarias(df: pd.DataFrame) -> pd.DataFrame:
+    """Dano registrado pela transportadora (não é tentativa de entrega nem extravio): pede o processo de avaria."""
+    return df[_mask_avaria(df) & ~_mask_extravio(df)].copy()
+
+
 def insucessos(df: pd.DataFrame, limite: int = LIMITE_AUSENTES) -> pd.DataFrame:
     cont = _contagem(df).fillna(0)
     return df[_tem_problema(df) & (cont < limite) & ~_mask_extravio(df)].copy()

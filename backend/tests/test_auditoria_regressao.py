@@ -165,6 +165,19 @@ def test_h04_ocorrencia_ja_em_rota_nao_e_vigente():
     assert (reg(a, 1)["reroteada"], reg(a, 2)["reroteada"]) == (True, False)
 
 
+# ----------------------------------------------------------------- avaria e peça sem tentativa
+def test_avaria_nao_e_tentativa_de_entrega():
+    atual = rel(L(1, status="recebido no DS", prob="Avaria", motivo="Embalagem danificada", lpd="2026-10-12 05:33:00", cont=0, dt=None, ent=None),
+                L(2, prob="Avaria", motivo="Caixa danificada", lpd="2026-10-12 07:00:00", cont=1, dt=None),
+                L(3, prob="Lost package", motivo="Encomenda danificada e extraviada", lpd="2026-10-12 07:00:00", cont=1, dt=None),
+                L(4, prob="Não entregue", motivo="Telefone não atendido", lpd="2026-10-12 07:00:00", cont=1, dt=None),
+                L(5))
+    a = rodar(rel(L(9)), atual)
+    assert "avaria" in reg(a, 1)["excecoes"] and "avaria" in reg(a, 2)["excecoes"]
+    assert "avaria" not in reg(a, 3)["excecoes"] and "extravio" in reg(a, 3)["excecoes"]  # extravio tem precedência
+    assert reg(a, 4)["excecoes"] == ["insucesso"] and reg(a, 5)["excecoes"] == []
+
+
 # ----------------------------------------------------------------- M-02 deduplicação
 def test_m02_duplicata_vale_o_evento_mais_recente():
     mais_novo = L(1, prob="Não entregue", motivo="x", lpd="2026-10-12 11:00:00", cont=1)

@@ -5,7 +5,7 @@ type Valor = string | number | null;
 type Dados = Record<string, Valor>;
 
 type TipoErroPiso = "Entregador fora da área" | "Entregador sem histórico" | "Região com pouco histórico" | "Sem entregador" | "Cidade fora da abrangência" | "Cidade ausente";
-type TipoExcecao = "devolucao" | "extravio" | "insucesso" | "revisar_tentativas";
+type TipoExcecao = "devolucao" | "extravio" | "insucesso" | "revisar_tentativas" | "avaria";
 type OrigemReferencia = "nome_arquivo" | "ultimo_evento" | "definida" | "relogio";
 type Faixa = "0-1 dia" | "2-3 dias" | "4+ dias";
 type Classe = "Entregue" | "Não entregue" | "Anormal";

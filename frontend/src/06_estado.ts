@@ -103,19 +103,22 @@ const justificada = (awb: string) => !!E.analise && !!E.analise.justificativas[a
 // Regra do operador por número de tentativas: 1 → colocar em rota de novo; 2 → rota de
 // novo e ver com o entregador se devolve; 3 → processo de devolução. Quem já saiu de
 // novo para entrega depois da ocorrência (`reroteada`) sai das listas de ação.
-type AcaoPend = "atrasadas" | "tent1" | "tent2" | "tent3" | "extravio" | "ja_em_rota";
+// Avaria não é tentativa de entrega (a peça pode nem ter saído do galpão): tem lista própria, com o processo de
+// avaria, e não entra nas de tentativas. Peça com 0 tentativas e outro problema também não é "1 tentativa".
+type AcaoPend = "atrasadas" | "tent1" | "tent2" | "tent3" | "extravio" | "avaria" | "ja_em_rota";
 type AbaPend = AcaoPend | "justificados";
 const DIAS_ATRASO = 2;
 const tentativasDe = (r: RegAtual) => Number(r.dados["Delivery Count"]) || 0;
 const PEND: Record<AcaoPend, (r: RegAtual) => boolean> = {
   atrasadas: (r) => r.backlog_dias !== null && r.backlog_dias >= DIAS_ATRASO && !r.entrega_confirmada,
-  tent1: (r) => r.excecoes.includes("insucesso") && tentativasDe(r) <= 1 && !r.reroteada && !r.entrega_confirmada,
-  tent2: (r) => r.excecoes.includes("insucesso") && tentativasDe(r) === 2 && !r.reroteada && !r.entrega_confirmada,
-  tent3: (r) => (r.excecoes.includes("devolucao") || r.excecoes.includes("revisar_tentativas")) && !r.entrega_confirmada,
+  tent1: (r) => r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria") && tentativasDe(r) === 1 && !r.reroteada && !r.entrega_confirmada,
+  tent2: (r) => r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria") && tentativasDe(r) === 2 && !r.reroteada && !r.entrega_confirmada,
+  tent3: (r) => (r.excecoes.includes("devolucao") || (r.excecoes.includes("revisar_tentativas") && !r.excecoes.includes("avaria"))) && !r.entrega_confirmada,
   extravio: (r) => r.excecoes.includes("extravio"),
-  ja_em_rota: (r) => r.excecoes.includes("insucesso") && r.reroteada && !r.entrega_confirmada,
+  avaria: (r) => r.excecoes.includes("avaria") && !r.entrega_confirmada,
+  ja_em_rota: (r) => r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria") && r.reroteada && !r.entrega_confirmada,
 };
-const ACOES_URGENTES: AcaoPend[] = ["atrasadas", "tent1", "tent2", "tent3", "extravio"];
+const ACOES_URGENTES: AcaoPend[] = ["atrasadas", "tent1", "tent2", "tent3", "extravio", "avaria"];
 const pendAtivas = (a: AcaoPend) => (E.analise ? E.analise.atual.filter((r) => PEND[a](r) && !justificada(awbDe(r.dados))) : []);
 const pendPrecisaAcao = (r: RegAtual) => !justificada(awbDe(r.dados)) && ACOES_URGENTES.some((a) => PEND[a](r));
 const pendJustificadas = () => (E.analise ? E.analise.atual.filter((r) => justificada(awbDe(r.dados)) && (r.excecoes.length || PEND.atrasadas(r))) : []);

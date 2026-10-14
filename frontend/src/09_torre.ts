@@ -3,7 +3,7 @@
 // Verbete de cada alerta da Torre (para a dica ao passar o mouse), pela ação e pela origem.
 const AJUDA_POR_ACAO: Record<string, string> = {
   "Revisar antes do carregamento": "piso", "Iniciar devolução": "tent3", "Colocar em rota e ver devolução": "tent2", "Colocar em rota": "tent1",
-  "Cobrar a entrega": "atrasadas", "Cobrar retorno do entregador": "tempo_rota", "Priorizar": "tempo_espera", "Confirmar com a transportadora": "possivel_devolucao",
+  "Seguir o processo de avaria": "avaria", "Cobrar a entrega": "atrasadas", "Cobrar retorno do entregador": "tempo_rota", "Priorizar": "tempo_espera", "Confirmar com a transportadora": "possivel_devolucao",
   "Ver quais são": "entregue_confirmada",
 };
 const ajudaDoAlerta = (acao: string, origem: string) => (acao === "Investigar" ? (origem === "O que mudou" ? "saiu_com_ocorrencia" : "extravio") : AJUDA_POR_ACAO[acao]);
@@ -12,7 +12,7 @@ function telaTorre(): HTMLElement {
   const a = E.analise!;
   const piso = errosPiso();
   const porTipo = contar(piso, (r) => r.erro_piso!.tipo);
-  const t1 = pendAtivas("tent1"), t2 = pendAtivas("tent2"), t3 = pendAtivas("tent3"), ext = pendAtivas("extravio"), atr = pendAtivas("atrasadas");
+  const t1 = pendAtivas("tent1"), t2 = pendAtivas("tent2"), t3 = pendAtivas("tent3"), ext = pendAtivas("extravio"), avr = pendAtivas("avaria"), atr = pendAtivas("atrasadas");
   const velhas = a.atual.filter((r) => r.faixa_backlog === "4+ dias");
   const comProblema = a.atual.filter((r) => r.dados["Last Problem Type"] !== null);
   const vigentes = comProblema.filter((r) => !r.reroteada && !r.entrega_confirmada);
@@ -31,6 +31,7 @@ function telaTorre(): HTMLElement {
     alertas.push({ tom: "critico", n: t3.length, texto: `${plural(t3.length, "encomenda com", "encomendas com")} 3 ou mais tentativas: iniciar a devolução${confirmar ? ` (${confirmar} por motivo que não é ausência, confirmar)` : ""}`, origem: "Pendências de entrega", acao: "Iniciar devolução", ir: irPend3("tent3") });
   }
   if (ext.length) alertas.push({ tom: "critico", n: ext.length, texto: `${plural(ext.length, "possível extravio", "possíveis extravios")}`, origem: "Pendências de entrega", acao: "Investigar", ir: irPend3("extravio") });
+  if (avr.length) alertas.push({ tom: "critico", n: avr.length, texto: `${plural(avr.length, "encomenda com avaria", "encomendas com avaria")}: seguir o processo de avaria (sinalizar o piso e pedir aprovação)`, origem: "Pendências de entrega", acao: "Seguir o processo de avaria", ir: irPend3("avaria") });
   if (t2.length) alertas.push({ tom: "atencao", n: t2.length, texto: `${plural(t2.length, "encomenda com", "encomendas com")} 2 tentativas e sem nova saída para rota: colocar em rota e ver com o entregador se devolve`, origem: "Pendências de entrega", acao: "Colocar em rota e ver devolução", ir: irPend3("tent2") });
   if (t1.length) alertas.push({ tom: "atencao", n: t1.length, texto: `${plural(t1.length, "encomenda com", "encomendas com")} 1 tentativa e sem nova saída para rota: colocar em rota de novo`, origem: "Pendências de entrega", acao: "Colocar em rota", ir: irPend3("tent1") });
   if (atr.length) alertas.push({ tom: "atencao", n: atr.length, texto: `${plural(atr.length, "encomenda pendente", "encomendas pendentes")} há ${DIAS_ATRASO} dias ou mais`, origem: "Pendências de entrega", acao: "Cobrar a entrega", ir: irPend3("atrasadas") });

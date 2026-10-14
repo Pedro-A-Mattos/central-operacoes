@@ -339,6 +339,7 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
     ext_ids = set(exc.extravios(pend)[cmp.AWB_COL])
     ins_ids = set(exc.insucessos(pend)[cmp.AWB_COL])
     rev_ids = set(exc.tentativas_a_revisar(pend)[cmp.AWB_COL])
+    avr_ids = set(exc.avarias(pend)[cmp.AWB_COL])
 
     atual = []
     for i, reg in enumerate(_registros(pend)):
@@ -375,6 +376,7 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
         if awb in ext_ids: tipos.append("extravio")
         if awb in ins_ids: tipos.append("insucesso")
         if awb in rev_ids: tipos.append("revisar_tentativas")
+        if awb in avr_ids: tipos.append("avaria")
         d["excecoes"] = tipos
         d["motivo_devolucao"] = exc.motivo_de_devolucao(f"{reg.get(cmp.PROBLEMA_COL) or ''} {reg.get(cmp.MOTIVO_COL) or ''}")
         atual.append(d)

@@ -153,7 +153,7 @@ const GLOSSARIO: Record<string, Explicacao> = {
   excecoes: {
     titulo: "Pendências de entrega",
     oQue: "As encomendas que dependem de uma ação do coordenador para a entrega acontecer: colocar em rota de novo, cobrar o entregador ou iniciar a devolução.",
-    calculo: "Cada aba é uma regra sobre as pendentes: 2+ dias pendentes; 1, 2 e 3 tentativas com ocorrência; extravios. Quem já saiu de novo para entrega depois da ocorrência não aparece nas listas de ação: vai para “Já em rota”.",
+    calculo: "Cada aba é uma regra sobre as pendentes: 2+ dias pendentes; 1, 2 e 3 tentativas com ocorrência; extravios; avarias. Quem já saiu de novo para entrega depois da ocorrência não aparece nas listas de ação: vai para “Já em rota”.",
     acao: "Trate cada encomenda ou justifique para tirá-la da lista ativa sem perder o registro.",
   },
   atrasadas: {
@@ -166,7 +166,7 @@ const GLOSSARIO: Record<string, Explicacao> = {
   tent1: {
     titulo: "1 tentativa",
     oQue: "Encomenda com uma tentativa de entrega que deu problema e que ainda não saiu para rota de novo.",
-    calculo: "Tem problema registrado, até 1 tentativa (Delivery Count), não é extravio, e a saída para entrega (Delivery Time) NÃO é posterior à data do problema (Last Problem Date).",
+    calculo: "Tem problema registrado, exatamente 1 tentativa (Delivery Count), não é extravio nem avaria, e a saída para entrega (Delivery Time) NÃO é posterior à data do problema (Last Problem Date). Peça com 0 tentativas não entra: ela nunca foi tentada.",
     exemplo: "“Não entregue — Telefone não atendido” em 10/10 às 11h, sem nenhuma saída para entrega depois disso.",
     aviso: "A saída para entrega é o sinal de que a peça foi colocada em rota de novo. Se o relatório não atualizar essa data, a peça continua aparecendo aqui mesmo já estando na rua.",
     acao: "Colocar em rota de novo. O entregador precisa avisar se já está em rota.",
@@ -174,7 +174,7 @@ const GLOSSARIO: Record<string, Explicacao> = {
   tent2: {
     titulo: "2 tentativas",
     oQue: "Encomenda com duas tentativas de entrega, com problema, que ainda não saiu para rota de novo.",
-    calculo: "Tem problema registrado, exatamente 2 tentativas, não é extravio, e não há saída para entrega depois da data do problema.",
+    calculo: "Tem problema registrado, exatamente 2 tentativas, não é extravio nem avaria, e não há saída para entrega depois da data do problema.",
     acao: "Colocar em rota de novo e verificar com o entregador se vai devolver a peça. Ele precisa avisar se já está em rota.",
   },
   tent3: {
@@ -183,6 +183,13 @@ const GLOSSARIO: Record<string, Explicacao> = {
     calculo: "Tentativas (Delivery Count) maior ou igual a 3. Quando o último motivo é ausência ou recusa, a ação é “Iniciar devolução”. Quando é outro motivo (ex.: reprogramação a pedido do cliente), a ação é “Confirmar devolução”.",
     aviso: "O relatório traz só o ÚLTIMO motivo, não o de cada tentativa. Uma reprogramação pedida pelo cliente não é ausência, por isso pede confirmação antes de devolver (decisão OP-02, 11/10).",
     acao: "Realize o processo de devolução ou justifique, por exemplo, se o cliente pediu nova data.",
+  },
+  avaria: {
+    titulo: "Avarias (processo)",
+    oQue: "Encomendas com dano registrado pela transportadora. Não são tentativa de entrega: a peça pode nem ter saído do galpão. Pedem o processo de avaria.",
+    calculo: "O tipo ou o motivo do problema contém “avaria” ou “danific”, e não é extravio. Vale com 0 tentativas ou mais; fica de fora quem já tem entrega confirmada.",
+    aviso: "O relatório não traz o horário de deslacre do caminhão, então os prazos de 4 h (iMile) e 2 h (Anjun) não são medidos aqui. Confira no processo.",
+    acao: "Sinalize o piso, peça a aprovação e, se couber, separe para o retorno no próximo caminhão. Justifique para tirar da lista ativa.",
   },
   ja_em_rota: {
     titulo: "Já em rota",

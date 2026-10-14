@@ -115,13 +115,14 @@ const REGRA_PEND: Record<Exclude<AbaPend, "justificados">, Filho> = {
   tent2: "Ocorrência com 2 tentativas e nenhuma saída para rota depois dela. Ação: colocar em rota de novo e verificar com o entregador se vai devolver a peça. Ele precisa avisar se já está em rota.",
   tent3: "3 ou mais tentativas: realizar o processo de devolução. Quando o último motivo não é ausência nem recusa (ex.: reprogramação a pedido do cliente), a peça aparece como “confirmar” antes de devolver.",
   extravio: "O tipo ou o motivo do problema contém “lost” ou “extravi”. Ação: investigar com a transportadora.",
+  avaria: "O tipo ou o motivo do problema contém “avaria” ou “danific”, e não é extravio. Não é tentativa de entrega: a peça pode nem ter saído do galpão. Ação: seguir o processo de avaria (sinalizar o piso e pedir aprovação). O relatório não traz o horário de deslacre do caminhão, então os prazos de 4 h (iMile) e 2 h (Anjun) não são medidos aqui.",
   ja_em_rota: "Tinham ocorrência, mas a saída para entrega é POSTERIOR a ela: já foram colocadas em rota de novo. Saem das listas de ação; esta aba serve para conferir.",
 };
 const ACAO_PEND: Record<Exclude<AbaPend, "justificados">, string> = {
   atrasadas: "Cobrar a entrega", tent1: "Colocar em rota", tent2: "Colocar em rota e ver devolução", tent3: "Iniciar devolução",
-  extravio: "Investigar extravio", ja_em_rota: "Conferir se está em rota",
+  extravio: "Investigar extravio", avaria: "Seguir o processo de avaria", ja_em_rota: "Conferir se está em rota",
 };
-const TOM_ACAO: Record<Exclude<AbaPend, "justificados">, Tom> = { atrasadas: "atencao", tent1: "atencao", tent2: "atencao", tent3: "critico", extravio: "critico", ja_em_rota: "ok" };
+const TOM_ACAO: Record<Exclude<AbaPend, "justificados">, Tom> = { atrasadas: "atencao", tent1: "atencao", tent2: "atencao", tent3: "critico", extravio: "critico", avaria: "critico", ja_em_rota: "ok" };
 const MARCADOS_EXC = new Set<string>();
 
 async function justificarVarias(awbs: string[], motivo: string, observacao: string, reavaliar: string) {
@@ -221,6 +222,7 @@ function telaExcecoes(): HTMLElement {
       { id: "tent2" as const, rotulo: "2 tentativas", n: ativas.tent2.length, tom: "atencao" as Tom },
       { id: "tent3" as const, rotulo: "3 tentativas · devolução", n: ativas.tent3.length, tom: "critico" as Tom },
       { id: "extravio" as const, rotulo: "Extravios", n: ativas.extravio.length, tom: "critico" as Tom },
+      { id: "avaria" as const, rotulo: "Avarias", n: ativas.avaria.length, tom: "critico" as Tom },
       { id: "ja_em_rota" as const, rotulo: "Já em rota", n: ativas.ja_em_rota.length },
       { id: "justificados" as const, rotulo: "Justificados", n: just.length },
     ], f.aba, (v) => set(() => { f.aba = v; MARCADOS_EXC.clear(); })),
