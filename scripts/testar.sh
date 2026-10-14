@@ -19,11 +19,13 @@ etapa() {  # etapa "nome" comando...
 cd "$RAIZ/backend"
 etapa "Critérios de aceite e API (pytest)" "$PY" -m pytest -q tests/
 etapa "Referência do motor Python" bash -c "\"$PY\" tests/gerar_referencia.py > \"$TMP/ref.json\""
+etapa "Referência sintética do motor Python" bash -c "\"$PY\" tests/gerar_referencia_sintetica.py \"$TMP/sint\" > \"$TMP/ref_sint.json\""
 
 cd "$RAIZ/frontend"
 if [ -x "$TSC" ]; then etapa "Checagem de tipos (tsc --noEmit)" "$TSC" -p tsconfig.json
 else falhas+=("Checagem de tipos (tsc não encontrado: rode 'npm install' em frontend/)"); fi
 etapa "Paridade motor local × Python" node tests/paridade.mjs "$TMP/ref.json"
+etapa "Paridade sintética (sem dados privados)" env DADOS_DIR="$TMP/sint" node tests/paridade.mjs "$TMP/ref_sint.json"
 etapa "Build" node build.mjs
 etapa "Smoke do bundle" node tests/smoke_bundle.mjs
 etapa "Filtro por coluna" node tests/filtro_coluna.mjs

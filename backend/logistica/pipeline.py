@@ -110,9 +110,9 @@ def validar_arquivo(df_bruto: pd.DataFrame, nome: str) -> dict:
     if info["sem_awb"]:
         avisos.append(f"{info['sem_awb']} linha(s) sem código da encomenda serão descartadas.")
     if info["duplicadas"]:
-        avisos.append(f"{info['duplicadas']} código(s) repetido(s): será mantida a última ocorrência de cada um.")
+        avisos.append(f"{info['duplicadas']} código(s) repetido(s): será mantido o registro de evento mais recente de cada um (em empate, a última linha).")
     if cmp.CHEGADA_COL in norm.columns:
-        ch = pd.to_datetime(norm[cmp.CHEGADA_COL], errors="coerce").dropna()
+        ch = cmp.para_data(norm[cmp.CHEGADA_COL]).dropna()
         if len(ch):
             info["chegada_min"] = ch.min().strftime("%Y-%m-%d %H:%M:%S")
             info["chegada_max"] = ch.max().strftime("%Y-%m-%d %H:%M:%S")
@@ -130,16 +130,25 @@ def _canon(v) -> str:
 
 
 def _grafias(df: pd.DataFrame, col: str, grupo: str | None) -> list[list[str]]:
+    """Grupos de grafias do mesmo valor (caixa, acento, espaços). Opera nos pares ÚNICOS (grupo, valor): o
+    laço por linha com iterrows custava ~80% da validação de um arquivo de 20 mil linhas."""
     if col not in df.columns:
         return []
+    vals = df[col]
+    ok = (vals.notna() & (vals.astype("string").str.strip() != "")).fillna(False).astype(bool)
+    if grupo and grupo in df.columns:
+        g = df[grupo].astype("string").str.strip().fillna("")
+    else:
+        g = pd.Series("", index=df.index, dtype="string")
+    pares = pd.DataFrame({"g": g[ok].astype(str), "v": vals[ok].astype(str)}).drop_duplicates()
     mapa: dict[str, set[str]] = {}
-    for _, r in df.iterrows():
-        v = r[col]
-        if v is None or pd.isna(v) or str(v).strip() == "":
-            continue
-        g = str(r[grupo]).strip() if grupo and grupo in df.columns and not pd.isna(r[grupo]) else ""
-        mapa.setdefault(g + "|" + _canon(v), set()).add(str(v))
+    for gg, vv in zip(pares["g"], pares["v"]):
+        mapa.setdefault(gg + "|" + _canon(vv), set()).add(vv)
     return [sorted(v) for k, v in sorted(mapa.items()) if len(v) > 1]
+
+
+def _tem_texto(s: pd.Series) -> pd.Series:
+    return (s.notna() & (s.astype("string").str.strip() != "")).fillna(False).astype(bool)
 
 
 def qualidade(norm: pd.DataFrame) -> list[dict]:
@@ -165,8 +174,12 @@ def qualidade(norm: pd.DataFrame) -> list[dict]:
         "Ficam em “Fora da jurisdição” e não entram em nenhum indicador.", tom="info")
     if cmp.CHEGADA_COL in norm.columns:
         add("sem_chegada", "linhas sem data de chegada válida",
-            int(pd.to_datetime(norm[cmp.CHEGADA_COL], errors="coerce").isna().sum()),
+            int(cmp.para_data(norm[cmp.CHEGADA_COL]).isna().sum()),
             "Ficam fora das faixas de tempo de espera e do filtro por dia.")
+    cols_data = [c for c in met.COLUNAS_EVENTO if c in norm.columns]
+    invalidas = sum(int((_tem_texto(norm[c]) & cmp.para_data(norm[c]).isna()).sum()) for c in cols_data)
+    add("datas_invalidas", "datas em formato não reconhecido", invalidas,
+        "Ficam sem data: afetam faixas de espera, tempo em rota e a data de referência. Aceitos: aaaa-mm-dd hh:mm:ss e dd/mm/aaaa hh:mm.")
     add("sem_entregador", "linhas com cidade e sem entregador", int((com_cidade & ~tem(rg.ENTREGADOR_COL)).sum()),
         "Aparecem como “Sem entregador” na conferência de piso.")
     add("sem_bairro", "linhas com cidade e sem bairro", int((com_cidade & ~tem(rg.AREA_COL)).sum()),
@@ -176,15 +189,29 @@ def qualidade(norm: pd.DataFrame) -> list[dict]:
     return out
 
 
+def _ultimo_evento(df: pd.DataFrame) -> pd.Timestamp | None:
+    datas = [cmp.para_data(df[c]).max() for c in met.COLUNAS_EVENTO if c in df.columns]
+    datas = [d for d in datas if not pd.isna(d)]
+    return max(datas) if datas else None
+
+
 def indicio_ordem(base: pd.DataFrame, atual: pd.DataFrame) -> dict:
-    """OP-07 (evolução, apenas alerta): compara a sobreposição dos códigos.
-    Num par correto, quase tudo do atual já existia na base e muitas saem.
-    Nunca troca a ordem sozinho."""
+    """OP-07 (alerta, nunca troca a ordem sozinho). Auditoria H-02: a ordem vem das DATAS.
+    O relatório mais novo registra o evento mais recente; se a base tem evento posterior ao do
+    atualizado, os arquivos provavelmente estão invertidos. O volume NÃO serve de sinal: o
+    atualizado costuma crescer (chegadas novas) e a regra antiga acusava o par correto e deixava
+    passar o invertido. Sem datas nos dois lados, cai na comparação de códigos (sinal fraco)."""
     b, a = set(base[cmp.AWB_COL]), set(atual[cmp.AWB_COL])
     so_atual, so_base = len(a - b), len(b - a)
-    suspeito = so_atual > so_base and len(a) > len(b)
+    ev_b, ev_a = _ultimo_evento(base), _ultimo_evento(atual)
+    if ev_b is not None and ev_a is not None:
+        suspeito = ev_b > ev_a
+    else:
+        suspeito = so_atual > so_base and len(a) > len(b)
+    fmt = lambda d: None if d is None else d.strftime("%Y-%m-%d %H:%M:%S")
     return {"so_no_atual": so_atual, "so_na_base": so_base, "em_ambos": len(a & b),
-            "linhas_base": len(b), "linhas_atual": len(a), "possivel_inversao": bool(suspeito)}
+            "linhas_base": len(b), "linhas_atual": len(a), "possivel_inversao": bool(suspeito),
+            "evento_base": fmt(ev_b), "evento_atual": fmt(ev_a)}
 
 
 # ---------- Análise completa ----------
@@ -215,7 +242,7 @@ def _nao_recebido_com_entrega(ult: pd.DataFrame) -> list[dict]:
     if not len(sub):
         return []
     confirmada = met.entrega_confirmada(sub)
-    dt = pd.to_datetime(sub.get("Delivery Time"), errors="coerce") if "Delivery Time" in sub.columns else pd.Series(pd.NaT, index=sub.index)
+    dt = cmp.para_data(sub["Delivery Time"]) if "Delivery Time" in sub.columns else pd.Series(pd.NaT, index=sub.index)
     tem_dt = dt.notna()
     out = []
     for i, (_, linha) in enumerate(sub.iterrows()):
@@ -229,6 +256,48 @@ def _nao_recebido_com_entrega(ult: pd.DataFrame) -> list[dict]:
     return out
 
 
+CAT_PROVAVEL, CAT_DEVOLUCAO, CAT_JA_ENTREGUE, CAT_OCORRENCIA = "provavel_entrega", "possivel_devolucao", "ja_entregue", "saiu_com_ocorrencia"
+
+
+def classificar_saidas(saiu: pd.DataFrame) -> pd.Series:
+    """Categoria de cada AWB que SAIU do relatório (auditoria C-01 e M-01). Do mais ao menos específico:
+      ja_entregue          já constava entregue (status/assinatura) na base: sair é só a purga do relatório, não progresso;
+      possivel_devolucao   palavra de devolução OU 3+ tentativas com último motivo de ausência/recusa;
+      saiu_com_ocorrencia  extravio ou avaria no último problema: sumir não prova entrega;
+      provavel_entrega     o resto: peça aberta que deixou o relatório (inferido; o relatório não confirma)."""
+    cat = pd.Series(CAT_PROVAVEL, index=saiu.index, dtype="object")
+    if saiu.empty:
+        return cat
+    ocorrencia = exc._mask_extravio(saiu) | exc._mask_avaria(saiu)
+    devolucao = cmp._tem_indicio_devolucao(saiu) | ((exc._contagem(saiu) >= exc.LIMITE_AUSENTES).fillna(False) & exc._motivo_de_devolucao(saiu))
+    cat[ocorrencia] = CAT_OCORRENCIA
+    cat[devolucao] = CAT_DEVOLUCAO
+    cat[met.entrega_confirmada(saiu)] = CAT_JA_ENTREGUE
+    return cat
+
+
+def filtrar_relatorios(base: pd.DataFrame, ult: pd.DataFrame, ignorar_descarregado: bool, ignorar_nao_recebido: bool) -> dict:
+    """Filtros globais, aplicados de forma SIMÉTRICA (auditoria H-03). Cada filtro age por relatório
+    (descarregado, não recebido, força maior, sem cidade); uma peça retirada de UM deles também sai do OUTRO.
+    Sem isso, uma peça que continua no atualizado mas virou FM/descarregado/etc. "sumia" e era contada como
+    entrega. `cruzadas_*` contam as peças retiradas só por causa do outro relatório."""
+    b1 = cmp.aplicar_filtro_descarregado(base, ignorar_descarregado)
+    u1 = cmp.aplicar_filtro_descarregado(ult, ignorar_descarregado)
+    b1b = cmp.aplicar_filtro_nao_recebido(b1, ignorar_nao_recebido)
+    u1b = cmp.aplicar_filtro_nao_recebido(u1, ignorar_nao_recebido)
+    b2, u2 = cmp.remover_fm(b1b), cmp.remover_fm(u1b)
+    base_f, base_fora = cmp.separar_fora_jurisdicao(b2)
+    ult_f, ult_fora = cmp.separar_fora_jurisdicao(u2)
+    excluir = (set(base[cmp.AWB_COL]) - set(base_f[cmp.AWB_COL])) | (set(ult[cmp.AWB_COL]) - set(ult_f[cmp.AWB_COL]))
+    cruz_b = base_f[cmp.AWB_COL].isin(excluir)
+    cruz_u = ult_f[cmp.AWB_COL].isin(excluir)
+    ids = sorted(set(base_f.loc[cruz_b, cmp.AWB_COL]) | set(ult_f.loc[cruz_u, cmp.AWB_COL]))
+    return {"b1": b1, "u1": u1, "b1b": b1b, "u1b": u1b, "b2": b2, "u2": u2,
+            "base_f": base_f[~cruz_b].reset_index(drop=True), "ult_f": ult_f[~cruz_u].reset_index(drop=True),
+            "base_fora": base_fora, "ult_fora": ult_fora,
+            "cruzadas_base": int(cruz_b.sum()), "cruzadas_atual": int(cruz_u.sum()), "cruzadas_ids": ids}
+
+
 def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
              justificativas: dict | None = None, nomes: tuple[str, str] = ("base", "atual")) -> dict:
     base = cmp.normalizar_relatorio(base_bruto)
@@ -240,13 +309,9 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
         if ref is None:
             ref, ref_origem = pd.Timestamp.now().floor("s"), "relogio"
 
-    b1 = cmp.aplicar_filtro_descarregado(base, p.ignorar_descarregado)
-    u1 = cmp.aplicar_filtro_descarregado(ult, p.ignorar_descarregado)
-    b1b = cmp.aplicar_filtro_nao_recebido(b1, p.ignorar_nao_recebido)
-    u1b = cmp.aplicar_filtro_nao_recebido(u1, p.ignorar_nao_recebido)
-    b2, u2 = cmp.remover_fm(b1b), cmp.remover_fm(u1b)
-    base_f, base_fora = cmp.separar_fora_jurisdicao(b2)
-    ult_f, ult_fora = cmp.separar_fora_jurisdicao(u2)
+    fl = filtrar_relatorios(base, ult, p.ignorar_descarregado, p.ignorar_nao_recebido)
+    b1, u1, b1b, u1b, b2, u2 = fl["b1"], fl["u1"], fl["b1b"], fl["u1b"], fl["b2"], fl["u2"]
+    base_f, ult_f, base_fora, ult_fora = fl["base_f"], fl["ult_f"], fl["base_fora"], fl["ult_fora"]
 
     res = cmp.comparar(base_f, ult_f)
     overrides = p.overrides or {"por_cidade": {}, "cidades_ignoradas": []}
@@ -254,7 +319,7 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
     ignoradas = list(dict.fromkeys(list(overrides.get("cidades_ignoradas", [])) + list(p.cidades_ignoradas)))
     usar_regiao = bool(p.mapa_regiao and (p.mapa_regiao.get("por_cep") or p.mapa_regiao.get("por_bairro") or p.mapa_regiao.get("por_cidade")))
     if usar_regiao:
-        erros = rg.validar_piso_por_regiao(res.pendentes, p.mapa_regiao, ignoradas)
+        erros = rg.validar_piso_por_regiao(res.pendentes, p.mapa_regiao, ignoradas, overrides)
     else:
         erros = rg.validar_piso(res.pendentes, regras, ignoradas)
 
@@ -264,6 +329,7 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
     faixa = met.faixa_backlog_por_linha(pend, ref)
     em_rota = met.minutos_em_rota(pend, ref)
     confirmada = met.entrega_confirmada(pend)
+    reroteadas = met.reroteada(pend)
     base_ids = set(base_f[cmp.AWB_COL])
     ent_base = dict(zip(base_f[cmp.AWB_COL], base_f.get(rg.ENTREGADOR_COL, pd.Series(dtype=object))))
     mudou = {r[cmp.AWB_COL]: (r["status_base"], r["status_ultima"]) for _, r in res.mudou_status.iterrows()}
@@ -280,10 +346,11 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
         d = {"dados": reg}
         d["nova"] = awb not in base_ids
         d["classe_operacional"] = classe.iloc[i]
-        d["backlog_dias"] = None if pd.isna(dias.iloc[i]) else round(float(dias.iloc[i]), 2)
+        d["backlog_dias"] = None if pd.isna(dias.iloc[i]) else math.floor(float(dias.iloc[i]) * 100 + 0.5) / 100
         d["faixa_backlog"] = None if pd.isna(faixa.iloc[i]) else faixa.iloc[i]
         d["em_rota_min"] = None if pd.isna(em_rota.iloc[i]) else int(em_rota.iloc[i])
         d["entrega_confirmada"] = bool(confirmada.iloc[i])
+        d["reroteada"] = bool(reroteadas.iloc[i])
         d["status_base"] = _valor(status_base.get(awb)) if awb in base_ids else None
         d["mudou_status"] = awb in mudou
         d["entregador_base"] = _valor(ent_base.get(awb)) if awb in base_ids else None
@@ -312,11 +379,16 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
         d["motivo_devolucao"] = exc.motivo_de_devolucao(f"{reg.get(cmp.PROBLEMA_COL) or ''} {reg.get(cmp.MOTIVO_COL) or ''}")
         atual.append(d)
 
+    saiu = base_f[~base_f[cmp.AWB_COL].isin(set(ult_f[cmp.AWB_COL]))]
+    cats = classificar_saidas(saiu)
     sairam = []
-    for cat, df in (("provavel_entrega", res.saiu_entregue), ("possivel_devolucao", res.saiu_devolucao)):
-        for reg in _registros(df):
-            txt = f"{reg.get(cmp.PROBLEMA_COL) or ''} {reg.get(cmp.MOTIVO_COL) or ''}"
-            sairam.append({"dados": reg, "categoria": cat, "indicio": _palavra_devolucao(txt)})
+    for reg, cat in zip(_registros(saiu), cats.tolist()):
+        txt = f"{reg.get(cmp.PROBLEMA_COL) or ''} {reg.get(cmp.MOTIVO_COL) or ''}"
+        indicio = _palavra_devolucao(txt) or (exc.motivo_de_devolucao(txt) if cat == CAT_DEVOLUCAO else None)
+        sairam.append({"dados": reg, "categoria": cat, "indicio": indicio})
+    n_cat = cats.value_counts()
+    resumo = {**res.resumo, "saiu_entregue": int(n_cat.get(CAT_PROVAVEL, 0)), "saiu_devolucao": int(n_cat.get(CAT_DEVOLUCAO, 0)),
+              "saiu_ja_entregue": int(n_cat.get(CAT_JA_ENTREGUE, 0)), "saiu_com_ocorrencia": int(n_cat.get(CAT_OCORRENCIA, 0))}
 
     regras_out = {
         "por_cidade": {c: {"entregadores": sorted(v), "origem": regras.origem_cidade.get(c, "derivada"),
@@ -348,13 +420,15 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
             "nao_recebido_base": len(b1) - len(b1b), "nao_recebido_atual": len(u1) - len(u1b),
             "fm_base": len(b1b) - len(b2), "fm_atual": len(u1b) - len(u2),
             "fora_base": len(base_fora), "fora_atual": len(ult_fora),
+            "cruzadas_base": fl["cruzadas_base"], "cruzadas_atual": fl["cruzadas_atual"],
         },
         "removidas": {
             "fm": sorted(set(b1b[cmp.AWB_COL]) - set(b2[cmp.AWB_COL]) | set(u1b[cmp.AWB_COL]) - set(u2[cmp.AWB_COL])),
             "descarregado": sorted(set(base[cmp.AWB_COL]) - set(b1[cmp.AWB_COL]) | set(ult[cmp.AWB_COL]) - set(u1[cmp.AWB_COL])),
             "nao_recebido": sorted(set(b1[cmp.AWB_COL]) - set(b1b[cmp.AWB_COL]) | set(u1[cmp.AWB_COL]) - set(u1b[cmp.AWB_COL])),
+            "cruzadas": fl["cruzadas_ids"],
         },
-        "resumo": res.resumo,
+        "resumo": resumo,
         "entregues_confirmadas": int(confirmada.sum()),
         "ordem": indicio_ordem(base, ult),
         "atual": atual,
@@ -371,16 +445,18 @@ def analisar(base_bruto: pd.DataFrame, atual_bruto: pd.DataFrame, p: Parametros,
 
 
 def desempenho(base_f: pd.DataFrame, ult_f: pd.DataFrame, dias: list[str]) -> dict:
-    """Aba Entregadores: o filtro de dias recalcula a comparação (RN-011)."""
+    """Aba Entregadores: progresso sobre as peças ABERTAS do entregador na base (C-01); o filtro de dias
+    recalcula a comparação (RN-011). As já entregues na base ficam fora do universo e aparecem em `ja_entregues`."""
     b = cmp.filtrar_por_dias_chegada(base_f, dias)
     u = cmp.filtrar_por_dias_chegada(ult_f, dias)
-    r = cmp.comparar(b, u)
-    ids = set(r.saiu_entregue[cmp.AWB_COL])
-    tab = met.desempenho_entregadores(b, u, ids)
-    linhas = met.linhas_classificadas_entregador(b, u, ids)
-    classes = {}
-    for _, row in linhas.iterrows():
-        classes.setdefault(row["entregador"], {}).setdefault(row["classe"], []).append(row[cmp.AWB_COL])
+    saiu = b[~b[cmp.AWB_COL].isin(set(u[cmp.AWB_COL]))]
+    categoria = dict(zip(saiu[cmp.AWB_COL], classificar_saidas(saiu).tolist()))
+    tab = met.desempenho_progresso(b, u, categoria)
+    cl = met.classes_progresso(b, u, categoria)
+    classes: dict = {}
+    for awb, ent, c in zip(cl[cmp.AWB_COL], cl["entregador"], cl["classe"]):
+        if c in met.CLASSES_PROGRESSO:
+            classes.setdefault(ent, {}).setdefault(c, []).append(awb)
     return {"dias": list(dias or []), "linhas": tab.to_dict(orient="records"), "awbs": classes}
 
 
@@ -390,9 +466,14 @@ def simular_regras(base_f: pd.DataFrame, ult_f: pd.DataFrame, atual: dict, novo:
     {"overrides": {...}, "limiar_ruido": int, "cidades_ignoradas": [...]}"""
     def erros(cfg):
         ov = cfg.get("overrides") or {"por_cidade": {}, "cidades_ignoradas": []}
-        regras = rg.aplicar_overrides(rg.derivar_regras(base_f, int(cfg.get("limiar_ruido", rg.LIMIAR_RUIDO))), ov)
         ign = list(dict.fromkeys(list(ov.get("cidades_ignoradas", [])) + list(cfg.get("cidades_ignoradas", []))))
-        e = rg.validar_piso(ult_f, regras, ign)
+        mapa = cfg.get("mapa_regiao")
+        if mapa and (mapa.get("por_cep") or mapa.get("por_bairro") or mapa.get("por_cidade")):
+            # mesmo validador do resultado real: a simulação não pode prever outra coisa (auditoria H-01)
+            e = rg.validar_piso_por_regiao(ult_f, mapa, ign, ov)
+        else:
+            regras = rg.aplicar_overrides(rg.derivar_regras(base_f, int(cfg.get("limiar_ruido", rg.LIMIAR_RUIDO))), ov)
+            e = rg.validar_piso(ult_f, regras, ign)
         return {r[cmp.AWB_COL]: r["tipo_erro"] for _, r in e.iterrows()}
     antes, depois = erros(atual), erros(novo)
     dados = {r[cmp.AWB_COL]: r for _, r in ult_f.iterrows()}

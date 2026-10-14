@@ -13,7 +13,7 @@ sys.path.insert(0, str(RAIZ))
 warnings.filterwarnings("ignore")
 from logistica import comparador as cmp  # noqa: E402
 from logistica import regras as rg  # noqa: E402
-from logistica.pipeline import Parametros, analisar, simular_regras, validar_arquivo  # noqa: E402
+from logistica.pipeline import Parametros, analisar, filtrar_relatorios, simular_regras, validar_arquivo  # noqa: E402
 
 REF = "2026-10-10 18:00:00"
 CENARIOS = [
@@ -57,7 +57,8 @@ for c in CENARIOS:
     atual_cfg = {"overrides": c["overrides"], "limiar_ruido": p["limiar_ruido"], "cidades_ignoradas": p["cidades_ignoradas"]}
     novo_cfg = {"overrides": {"por_cidade": {"Arinos": ["Giliard Barbosa de Oliveira", "Pedro Lopes de Jesus (Arinos)"]},
                               "cidades_ignoradas": ["Buritis"]}, "limiar_ruido": 2, "cidades_ignoradas": []}
-    sim = simular_regras(prep(b), prep(u), atual_cfg, novo_cfg)
+    fl = filtrar_relatorios(cmp.normalizar_relatorio(b), cmp.normalizar_relatorio(u), p["ignorar_descarregado"], p.get("ignorar_nao_recebido", True))
+    sim = simular_regras(fl["base_f"], fl["ult_f"], atual_cfg, novo_cfg)
     saida.append({**c, "nome_atual": nome_atual, "resultado": r, "validacao": val, "simulacao": {"atual": atual_cfg, "novo": novo_cfg, "resultado": sim}})
 
 # Paridade do Modo Estudo/Validação por região (CEP): deriva e valida sobre a mesma planilha.

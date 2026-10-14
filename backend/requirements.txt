@@ -4,3 +4,4 @@ fastapi>=0.110
 uvicorn>=0.29
 python-multipart>=0.0.9
 pytest>=8.0
+python-calamine>=0.2  # leitor de .xlsx em Rust (opcional: sem ele o pandas usa openpyxl, ~8x mais lento)

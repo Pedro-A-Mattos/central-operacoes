@@ -47,8 +47,9 @@ def test_auditoria_metricas_par_real():
     r = a["resumo"]
     assert r["pendentes"] == len(af)
     assert r["novas"] == len(ai - bi) == sum(1 for x in a["atual"] if x["nova"])
-    assert r["saiu_devolucao"] == dev
-    assert r["saiu_entregue"] == len(saiu) - dev
+    # Auditoria C-01/M-01: o que saiu se parte em quatro categorias; "devolução" agora também inclui 3+ tentativas por ausência.
+    assert r["saiu_entregue"] + r["saiu_devolucao"] + r["saiu_ja_entregue"] + r["saiu_com_ocorrencia"] == len(saiu)
+    assert r["saiu_devolucao"] >= dev
     assert r["mudou_status"] == mud
     assert r["base_total"] == len(bf) and r["ultima_total"] == len(af)
     # Neste par específico, não há encomendas novas (todos os AWBs do atual já
@@ -371,7 +372,28 @@ def test_piso_usa_mapa_regiao_quando_presente():
     # com mapa: todos os erros têm origem 'mapa de região' e escopo de região
     erros_com = [x["erro_piso"] for x in a_com["atual"] if x["erro_piso"]]
     assert erros_com and all(e["origem_regra"] == "mapa de região" for e in erros_com)
-    assert all(e["escopo"] in ("cep", "bairro", "cidade") for e in erros_com)
+    assert all(e["escopo"] in ("cep", "bairro", "cep+bairro", "cidade") for e in erros_com)
+
+
+def test_regiao_cep_e_bairro_somam():
+    # Caso real: o CEP genérico da sede pertence a um entregador, mas o bairro (distrito)
+    # é de outro. Vale quem atende o CEP OU o bairro; a cidade só entra sem nenhum dos dois.
+    mapa = {"limiar": 100,
+            "por_cep": {"38690000": ["Romario"]},
+            "por_bairro": {"Formoso|Goiaminas": ["Duilio"], "Formoso|Centro": ["Romario"]},
+            "por_cidade": {"Formoso": ["Duilio", "Romario"], "Unai": ["Ana"]}}
+    v, esc, ok = rg._validos_regiao(mapa, "38690-000", "Goiaminas", "Formoso")
+    assert ok and esc == "cep+bairro" and v == {"Romario", "Duilio"}
+    v, esc, _ = rg._validos_regiao(mapa, "38690-000", "Bairro sem regra", "Formoso")
+    assert esc == "cep" and v == {"Romario"}
+    v, esc, _ = rg._validos_regiao(mapa, None, "Goiaminas", "Formoso")
+    assert esc == "bairro" and v == {"Duilio"}
+    v, esc, _ = rg._validos_regiao(mapa, "99999999", "Rua X", "Unai")
+    assert esc == "cidade" and v == {"Ana"}
+    assert rg._validos_regiao(mapa, None, None, "Outra")[2] is False
+    linha = pd.DataFrame([{"Waybill No": "1", "Consignee City": "Formoso", "Consignee Area": "Goiaminas",
+                           "Consignee Zip Code": "38690-000", "Delivery Associate": "Duilio"}])
+    assert rg.validar_piso_por_regiao(linha, mapa).empty
 
 
 if __name__ == "__main__":

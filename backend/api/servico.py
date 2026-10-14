@@ -20,6 +20,7 @@ import pandas as pd
 
 from logistica import excecoes as exc
 from logistica import regras as rg
+from logistica.comparador import ler_planilha as cmp_ler_planilha
 from logistica.pipeline import Parametros, analisar, desempenho, simular_regras, validar_arquivo
 
 TAMANHO_MAXIMO = int(os.getenv("CIO_TAMANHO_MAXIMO_MB", "20")) * 1024 * 1024
@@ -103,7 +104,7 @@ def ler_excel_seguro(nome: str, conteudo: bytes) -> pd.DataFrame:
         raise ErroUsuario("Arquivo danificado ou não é Excel", "O conteúdo não corresponde a uma planilha .xlsx.",
                           "Abra o arquivo no Excel, salve como .xlsx e envie novamente.")
     try:
-        df = pd.read_excel(io.BytesIO(conteudo))
+        df = cmp_ler_planilha(io.BytesIO(conteudo))
     except Exception:  # noqa: BLE001 — a mensagem técnica vai para o log, não para a tela
         raise ErroUsuario("Não foi possível ler a planilha", "A planilha tem uma estrutura que o sistema não reconhece.",
                           "Confira se é o relatório Dispatch original, sem edições manuais.")
@@ -141,6 +142,7 @@ def carregar_exemplos() -> dict:
 def executar_analise(token_base: str, token_atual: str, parametros: dict) -> dict:
     base, atual = ARMAZEM.arquivo(token_base), ARMAZEM.arquivo(token_atual)
     ref = parametros.get("referencia_backlog")
+    mapa = parametros.get("mapa_regiao")
     p = Parametros(
         ignorar_descarregado=bool(parametros.get("ignorar_descarregado", True)),
         ignorar_nao_recebido=bool(parametros.get("ignorar_nao_recebido", True)),
@@ -148,17 +150,15 @@ def executar_analise(token_base: str, token_atual: str, parametros: dict) -> dic
         cidades_ignoradas=list(parametros.get("cidades_ignoradas", [])),
         overrides=rg.carregar_overrides(ARQ_REGRAS),
         referencia_backlog=pd.Timestamp(ref) if ref else None,
+        mapa_regiao=mapa if isinstance(mapa, dict) else None,
     )
     resultado = analisar(base.df, atual.df, p, exc.carregar_justificativas(ARQ_JUST), (base.nome, atual.nome))
     resultado["motor"] = "python"
     # guarda base_f/ult_f para recalcular o desempenho por dias
     from logistica import comparador as cmp
-    def _prep(df):
-        n = cmp.aplicar_filtro_descarregado(cmp.normalizar_relatorio(df), p.ignorar_descarregado)
-        n = cmp.aplicar_filtro_nao_recebido(n, p.ignorar_nao_recebido)
-        d = cmp.remover_fm(n)
-        return cmp.separar_fora_jurisdicao(d)[0]
-    resultado["id"] = ARMAZEM.guardar_analise(_prep(base.df), _prep(atual.df))
+    from logistica.pipeline import filtrar_relatorios
+    fl = filtrar_relatorios(cmp.normalizar_relatorio(base.df), cmp.normalizar_relatorio(atual.df), p.ignorar_descarregado, p.ignorar_nao_recebido)
+    resultado["id"] = ARMAZEM.guardar_analise(fl["base_f"], fl["ult_f"])
     return resultado
 
 

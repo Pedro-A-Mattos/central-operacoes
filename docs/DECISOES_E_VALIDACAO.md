@@ -19,12 +19,13 @@ invariante `entregue + anormal + pendente ≤ total`.
 - **Motor Python** (`backend/logistica`): fonte de verdade, usado pela API.
 - **Motor local** (`frontend/src/03_motor.ts`): necessário para a página
   funcionar sem servidor (demonstração e uso pontual). Não é uma segunda
-  regra: `tests/paridade.mjs` compara os dois em 5 cenários (padrão; ajuste
-  de piso + descarregado + rigor 5 + cidade ignorada; referência pelo nome do
-  arquivo; referência pelo último evento; arquivos invertidos) em **todos os
-  campos** do contrato — resumo, etapas, cada AWB, piso, exceções, regras,
-  desempenho, validação e qualidade da importação, referência e simulação de
-  regras. Resultado atual: paridade completa (150 verificações).
+  regra: `tests/paridade.mjs` compara os dois em **todos os campos** do contrato
+  — resumo, etapas, cada AWB, piso, exceções, regras, desempenho, validação e
+  qualidade da importação, referência e simulação de regras — em dois conjuntos:
+  as planilhas reais de exemplo (cenários do `gerar_referencia.py`) e cenários
+  **sintéticos** autocontidos (`gerar_referencia_sintetica.py`), que cobrem o
+  piso com mapa de região, ajuste manual, duplicatas, formatos de data e AWB,
+  filtros cruzados e saídas do relatório. `make test` roda os dois.
 - Regra para evoluir: toda mudança de regra entra primeiro no Python e no
   teste de paridade; o motor local acompanha ou é desligado.
 
@@ -130,3 +131,74 @@ resumo, checagens de qualidade na importação.
 - **Ainda não implementado:** parâmetros fixos configuráveis (OP-03),
   cadastro oficial de abrangência (OP-05), relacionar AWB nova à antiga,
   classificação de motivos por IA.
+
+## 9. Auditoria de confiabilidade (13/10/2026)
+
+Uma auditoria somente leitura procurou premissas que fazem os números dizerem mais (ou menos) do que representam. Os
+testes dos achados estão em `backend/tests/test_auditoria_regressao.py`. Decisões tomadas com o usuário:
+
+| Decisão | Resultado |
+|---|---|
+| **D1** O que é "% de entrega" | Progresso sobre as peças **abertas** do entregador na base, no intervalo entre os dois relatórios |
+| **D2** Ajuste manual × mapa | O ajuste manual por cidade **prevalece** sobre o mapa (OP-05) |
+| **D3** Entregador ausente do mapa | Categoria própria: **"Entregador sem histórico"** (revisar), separada de "fora da área" |
+| **D4** Amostra rotulada | Não existe; critério calibrado por hold-out (`docs/CALIBRACAO_REGIAO.md`) |
+| **D5** 3 tentativas por reprogramação | Fica na lista de devolução com a ação "Confirmar devolução"; **a validar com o operador** |
+| **D7** Lista de força maior | Não há lista; o funil da Torre mostra a quantidade e a busca por AWB explica |
+
+### O que mudou nas métricas
+
+- **Entrega por entregador (C-01).** O universo exclui peças que já estavam entregues na base (elas só saíram do
+  relatório). "Entrega" = confirmada no atualizado ou provável (sumiu sem sinal de devolução, extravio ou avaria). No
+  arquivo de exemplo: de 74 "prováveis entregas" (18,5%), 69 já estavam entregues na base; sobre as 330 abertas, o
+  progresso é **2,7%**. "Abaixo do ritmo" passou de 8 entregadores para 0.
+- **O que saiu do relatório (M-01).** Quatro categorias: provável entrega, possível devolução (agora também 3+ tentativas
+  por ausência), saiu com ocorrência (extravio/avaria) e já entregue antes. Sumir não prova entrega.
+- **Filtros simétricos (H-03).** Peça retirada de um relatório (FM, descarregado, não recebido, sem cidade) sai dos dois;
+  antes podia virar "entrega". O funil e a busca por AWB explicam a retirada.
+- **Ocorrência vigente × tratada (H-04).** O último problema fica no relatório mesmo depois de a peça voltar à rua.
+  "Ocorrência vigente" = problema sem saída para rota depois dele; "já tratada" = saída posterior. Entregue com problema
+  anterior é "Entregue", não "Anormal".
+- **Ordem dos relatórios (H-02).** Vem das datas dos eventos, não do volume (a regra antiga acusava o par correto).
+- **Duplicatas (M-02).** Vale o registro de evento mais recente; em empate, a última linha.
+- **Datas e AWB (M-04).** Uma só regra nos dois motores (ISO e dd/mm/aaaa; resto = sem data, contado na qualidade). O AWB
+  é lido como texto (zeros à esquerda não se fundem). `backlog_dias` arredonda meio para cima nos dois motores.
+- **Piso (C-02, H-01, H-05, M-05).** Mapa com suporte, entregadores conhecidos e proveniência; chaves normalizadas; ajuste
+  manual e simulação usam o mesmo validador do resultado; "Rigor" não se aplica com mapa ativo (a tela avisa).
+
+### Efeito nos critérios de aceite
+
+CA-003, CA-007, CA-008 e CA-009 não mudam: `comparar`, `desempenho_entregadores` e o caminho de piso **sem mapa** foram
+mantidos como estavam (o app passou a usar `classificar_saidas` e `desempenho_progresso`). O teste
+`test_auditoria_metricas_par_real` foi atualizado para a partição das saídas em quatro categorias.
+**Rode `make test` com as planilhas originais antes de publicar.**
+
+### Histórico
+
+Registros guardados antes de 13/10 usam a definição antiga de "prováveis entregas" e o campo `excecoes`; os novos
+guardam também `acoes` e os filtros usados. O histórico marca "não comparável" quando os filtros diferem entre duas
+importações.
+
+### Velocidade da importação (13/10/2026)
+
+Medido com o arquivo de estudo (8,9 MB, 21.665 linhas): o gargalo era **abrir o .xlsx**, não o pandas. O motor padrão
+(`openpyxl`) levava 14,6 s; o cálculo do pandas depois da leitura leva menos de 0,4 s. Mudanças (sem alterar resultados:
+conteúdo das colunas e análise completa idênticos, paridade intacta):
+
+- `ler_planilha` usa **`python-calamine`** (leitor em Rust, 1,8 s) quando instalado, com `openpyxl` como plano B
+  (`backend/requirements.txt`; o pacote é opcional).
+- `qualidade()` deixou de usar `iterrows` por linha (3,3 s → 0,12 s) e `para_data` ganhou caminho vetorizado.
+- No navegador, o envio ao servidor e a leitura local do mesmo arquivo passaram a andar em **paralelo**.
+
+Resultado na tela: envio do arquivo de estudo de **19,9 s para 2,5 s**. DuckDB e Polars não entram: não atacam esse
+gargalo e o volume (dezenas de milhares de linhas) não justifica reescrever o motor, que também existe em TypeScript.
+
+### Continua pendente
+
+- **Grafias de bairro no caminho sem mapa** (§7): unificar mudaria CA-007/008. O caminho com mapa já normaliza.
+- **RN-003** (entregues confirmadas seguem como pendentes): 17 de 1.435 no exemplo.
+- **`Delivery Time`** é tratado como saída para entrega; a regra de "já em rota" e o alerta de "mais de 24 h em rota"
+  dependem disso e ainda precisam de confirmação com a iMile (a mediana é 2,4 h após a chegada).
+- **Piso "antes do carregamento":** 84 de 92 alertas do exemplo já têm saída para entrega registrada. Falta saber se o
+  Dispatch é gerado antes ou depois do carregamento.
+

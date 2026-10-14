@@ -18,6 +18,8 @@ PROBLEMA_COL = "Last Problem Type"
 MOTIVO_COL = "Last Problem Reason"
 CIDADE_COL = "Consignee City"
 CHEGADA_COL = "Arrival Time"
+# Colunas com carimbo de data de evento: servem para escolher o registro mais recente de uma AWB repetida e para a data de referência.
+COLUNAS_EVENTO = ["Arrival Time", "Last Problem Date", "Delivery Time", "Sign Date"]
 ZIP_COL = "Consignee Zip Code"
 
 # Força maior no Last Problem Type. A iMile usa pelo menos duas grafias:
@@ -45,11 +47,35 @@ def normalizar_awb(serie: pd.Series) -> pd.Series:
     return serie.astype("string").str.replace(r"\.0$", "", regex=True).str.strip()
 
 
+def _motor_xlsx() -> str | None:
+    """'calamine' (leitor em Rust, ~8x mais rápido: 8,9 MB em 1,8 s contra 14,6 s) se o pacote existir; senão o padrão do pandas."""
+    try:
+        import python_calamine  # noqa: F401
+        return "calamine"
+    except ImportError:
+        return None
+
+
+_MOTOR_XLSX = _motor_xlsx()
+
+
+def ler_planilha(fonte) -> pd.DataFrame:
+    """Lê a primeira aba do .xlsx. O AWB entra como TEXTO: sem isso o pandas converte uma coluna de
+    códigos "numéricos" em inteiros e perde zeros à esquerda (auditoria M-04), fundindo '000123' e '123'.
+    O gargalo de importar é abrir o .xlsx, não o pandas: com calamine o resultado é o mesmo, bem mais rápido."""
+    if _MOTOR_XLSX:
+        try:
+            return pd.read_excel(fonte, dtype={AWB_COL: str}, engine=_MOTOR_XLSX)
+        except Exception:  # noqa: BLE001 — arquivo que o calamine não entende: tenta o motor padrão
+            if hasattr(fonte, "seek"):
+                fonte.seek(0)
+    return pd.read_excel(fonte, dtype={AWB_COL: str})
+
+
 def carregar_relatorio(fonte) -> pd.DataFrame:
     """RN-001/RN-002: lê a primeira planilha, normaliza a AWB, descarta nulas e
     mantém a última ocorrência de AWB repetida."""
-    df = pd.read_excel(fonte)
-    return normalizar_relatorio(df)
+    return normalizar_relatorio(ler_planilha(fonte))
 
 
 def normalizar_relatorio(df: pd.DataFrame) -> pd.DataFrame:
@@ -59,8 +85,57 @@ def normalizar_relatorio(df: pd.DataFrame) -> pd.DataFrame:
     df[AWB_COL] = normalizar_awb(df[AWB_COL])
     df.loc[df[AWB_COL] == "", AWB_COL] = pd.NA
     df = df.dropna(subset=[AWB_COL])
-    df = df.drop_duplicates(subset=[AWB_COL], keep="last")
+    if df[AWB_COL].duplicated().any():
+        # AWB repetida: vale o registro de evento mais recente; em empate (ou sem datas), a última linha.
+        # Antes valia sempre a última linha, e o resultado mudava com a ordem das linhas (auditoria M-02).
+        cols = [c for c in COLUNAS_EVENTO if c in df.columns]
+        t = pd.concat([para_data(df[c]) for c in cols], axis=1).max(axis=1) if cols else pd.Series(pd.NaT, index=df.index)
+        ordem = pd.DataFrame({"awb": df[AWB_COL].values, "t": t.fillna(pd.Timestamp("1900-01-01")).values, "pos": range(len(df))}, index=df.index)
+        vencedores = ordem.sort_values(["awb", "t", "pos"]).groupby("awb", sort=False).tail(1).index
+        df = df.loc[df.index.isin(vencedores)]
     return df.reset_index(drop=True)
+
+
+# Datas aceitas: ISO (aaaa-mm-dd[ T]hh:mm[:ss]) e brasileira (dd/mm/aaaa[ hh:mm[:ss]]). Qualquer outra coisa vira
+# "sem data" (e é contada na qualidade da importação). Nunca se adivinha: o pandas leria 12/10/2026 como mm/dd
+# (10 de dezembro) e tornaria "T" em NaT (auditoria M-04). O front aplica exatamente a mesma regra.
+_RE_DATA = re.compile(r"^\s*(?:(\d{4})-(\d{2})-(\d{2})|(\d{2})/(\d{2})/(\d{4}))(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?\s*$")
+
+
+def _para_ts(v):
+    if v is None:
+        return pd.NaT
+    if isinstance(v, pd.Timestamp):
+        return v
+    if hasattr(v, "year") and hasattr(v, "month") and hasattr(v, "hour"):  # datetime
+        return pd.Timestamp(v)
+    if not isinstance(v, str):
+        return pd.NaT
+    m = _RE_DATA.match(v)
+    if not m:
+        return pd.NaT
+    g = m.groups()
+    ano, mes, dia = (int(g[0]), int(g[1]), int(g[2])) if g[0] else (int(g[5]), int(g[4]), int(g[3]))
+    hh, mi, ss = int(g[6] or 0), int(g[7] or 0), int(g[8] or 0)
+    try:
+        return pd.Timestamp(year=ano, month=mes, day=dia, hour=hh, minute=mi, second=ss)
+    except ValueError:
+        return pd.NaT
+
+
+def para_data(serie: pd.Series) -> pd.Series:
+    """Série de datas segundo a regra acima. Colunas já em datetime (células de data do Excel) passam direto."""
+    if pd.api.types.is_datetime64_any_dtype(serie):
+        return serie
+    if pd.api.types.is_string_dtype(serie) and not pd.api.types.is_object_dtype(serie):
+        # caminho rápido (vetorizado) para o formato dos relatórios; o que não casar cai na regra completa abaixo
+        rapido = pd.to_datetime(serie, format="%Y-%m-%d %H:%M:%S", errors="coerce")
+        resto = rapido.isna() & serie.notna()
+        if not resto.any():
+            return rapido
+        completo = pd.to_datetime(serie[resto].map(_para_ts), errors="coerce")
+        return rapido.where(~resto, completo.reindex(serie.index))
+    return pd.to_datetime(serie.map(_para_ts), errors="coerce")
 
 
 def aplicar_filtro_descarregado(df: pd.DataFrame, ligado: bool) -> pd.DataFrame:
@@ -110,7 +185,7 @@ def separar_fora_jurisdicao(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
 def dias_chegada_disponiveis(df: pd.DataFrame) -> list[str]:
     if CHEGADA_COL not in df.columns:
         return []
-    datas = pd.to_datetime(df[CHEGADA_COL], errors="coerce").dropna()
+    datas = para_data(df[CHEGADA_COL]).dropna()
     return sorted({d.strftime("%Y-%m-%d") for d in datas})
 
 
@@ -118,7 +193,7 @@ def filtrar_por_dias_chegada(df: pd.DataFrame, dias: list[str] | None) -> pd.Dat
     """RN-011: vazio = todos."""
     if not dias or CHEGADA_COL not in df.columns:
         return df
-    datas = pd.to_datetime(df[CHEGADA_COL], errors="coerce").dt.strftime("%Y-%m-%d")
+    datas = para_data(df[CHEGADA_COL]).dt.strftime("%Y-%m-%d")
     return df[datas.isin(set(dias)).fillna(False)].reset_index(drop=True)
 
 

@@ -19,12 +19,13 @@ import re
 import numpy as np
 import pandas as pd
 
-from .comparador import AWB_COL, CHEGADA_COL, CIDADE_COL, PROBLEMA_COL, STATUS_COL
+from .comparador import AWB_COL, CHEGADA_COL, CIDADE_COL, PROBLEMA_COL, STATUS_COL, para_data
 from .regras import ENTREGADOR_COL
 
 DELIVERY_TIME_COL = "Delivery Time"  # saída para entrega
 SIGN_DATE_COL = "Sign Date"  # entrega confirmada (assinatura)
-COLUNAS_EVENTO = ["Arrival Time", "Last Problem Date", "Delivery Time", "Sign Date"]
+PROBLEM_DATE_COL = "Last Problem Date"  # data do último problema registrado
+from .comparador import COLUNAS_EVENTO  # noqa: E402,F401  (fonte única das colunas de evento)
 _RE_HORARIO_NOME = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T_ ](\d{2})[:h-]?(\d{2})[:m-]?(\d{2})")
 _STATUS_ENTREGUE = {"entregue", "assinado", "signed", "delivered"}
 
@@ -47,7 +48,7 @@ def _tem(df: pd.DataFrame, col: str) -> pd.Series:
 def calcular_backlog_dias(df: pd.DataFrame, referencia: pd.Timestamp | None = None) -> pd.Series:
     """Dias desde a chegada. Referência padrão = relógio (OP-06, preservado)."""
     ref = referencia if referencia is not None else pd.Timestamp.now()
-    chegada = pd.to_datetime(df.get(CHEGADA_COL), errors="coerce")
+    chegada = para_data(df[CHEGADA_COL]) if CHEGADA_COL in df.columns else None
     if chegada is None:
         return pd.Series(np.nan, index=df.index)
     return (ref - chegada).dt.total_seconds() / 86400.0
@@ -56,13 +57,24 @@ def calcular_backlog_dias(df: pd.DataFrame, referencia: pd.Timestamp | None = No
 def minutos_em_rota(df: pd.DataFrame, referencia: pd.Timestamp) -> pd.Series:
     """Minutos inteiros (truncados) desde a saída para entrega (Delivery Time), só
     para quem não tem entrega confirmada. Inteiro para ser idêntico nos dois motores."""
-    saida = pd.to_datetime(df.get(DELIVERY_TIME_COL), errors="coerce")
+    saida = para_data(df[DELIVERY_TIME_COL]) if DELIVERY_TIME_COL in df.columns else None
     if saida is None:
         return pd.Series(np.nan, index=df.index)
     h = ((referencia - saida).dt.total_seconds() // 60)
     h[entrega_confirmada(df)] = np.nan
     h[h < 0] = np.nan
     return h
+
+
+def reroteada(df: pd.DataFrame) -> pd.Series:
+    """Encomenda com problema que JÁ SAIU DE NOVO para entrega: a saída para entrega
+    (Delivery Time) é posterior à data do último problema (Last Problem Date). Sinal
+    de que o coordenador já tratou a ocorrência; ela não precisa mais da ação dele."""
+    if DELIVERY_TIME_COL not in df.columns or PROBLEM_DATE_COL not in df.columns:
+        return pd.Series(False, index=df.index)
+    saida = para_data(df[DELIVERY_TIME_COL])
+    ocorrencia = para_data(df[PROBLEM_DATE_COL])
+    return (_tem(df, PROBLEMA_COL) & (saida > ocorrencia)).fillna(False).astype(bool)
 
 
 def referencia_do_relatorio(nome: str | None, df: pd.DataFrame | None) -> tuple[pd.Timestamp | None, str]:
@@ -74,7 +86,7 @@ def referencia_do_relatorio(nome: str | None, df: pd.DataFrame | None) -> tuple[
         except ValueError:
             pass
     if df is not None:
-        datas = [pd.to_datetime(df[c], errors="coerce").max() for c in COLUNAS_EVENTO if c in df.columns]
+        datas = [para_data(df[c]).max() for c in COLUNAS_EVENTO if c in df.columns]
         datas = [d for d in datas if not pd.isna(d)]
         if datas:
             return max(datas), "ultimo_evento"
@@ -97,12 +109,13 @@ def entrega_confirmada(df: pd.DataFrame) -> pd.Series:
 
 
 def classificar(df: pd.DataFrame) -> pd.Series:
-    """RN-015 (revisada OP-01): Anormal (tem problema) > Entregue (confirmada) > Não entregue."""
+    """RN-015 (revisada OP-01 e H-04): Entregue (confirmada) > Anormal (tem problema) > Não entregue.
+    Quem foi entregue depois de uma tentativa frustrada é Entregue, não Anormal."""
     anormal = _tem(df, PROBLEMA_COL)
     entregue = entrega_confirmada(df)
     out = pd.Series(CLASSE_NAO_ENTREGUE, index=df.index, dtype="object")
-    out[entregue & ~anormal] = CLASSE_ENTREGUE
-    out[anormal] = CLASSE_ANORMAL
+    out[anormal & ~entregue] = CLASSE_ANORMAL
+    out[entregue] = CLASSE_ENTREGUE  # entrega confirmada vale mesmo com problema anterior (auditoria H-04)
     return out
 
 
@@ -150,6 +163,51 @@ def desempenho_entregadores(base: pd.DataFrame, ultima: pd.DataFrame, entregues_
                        "anormal": anormal, "pendente": pendente,
                        "pct_entregue": pct})
     return pd.DataFrame(linhas, columns=["entregador", "total", "entregue", "anormal", "pendente", "pct_entregue"])
+
+
+# ---- Progresso por entregador sobre as peças ABERTAS (auditoria C-01; decisão D1 de 13/10) ----
+# Universo: peças do entregador na base que AINDA NÃO estavam entregues. As já entregues na base saem do
+# universo (só saíram do relatório; não são progresso entre os dois arquivos). Para cada peça aberta:
+#   Entregue  = confirmada no atualizado (status/assinatura) OU saiu do relatório como "provável entrega";
+#   Anormal   = continua com ocorrência VIGENTE (problema e nenhuma saída para rota depois dele);
+#   Tratada   = continua com problema, mas já saiu de novo para entrega depois dele;
+#   Pendente  = continua, sem problema;
+#   Saiu      = saiu do relatório com sinal de devolução, extravio ou avaria (não é entrega).
+CLASSES_PROGRESSO = ("Entregue", "Anormal", "Tratada", "Pendente")
+
+
+def classes_progresso(base: pd.DataFrame, ultima: pd.DataFrame, categoria_saida: dict) -> pd.DataFrame:
+    """Uma linha por peça da base: AWB, entregador e classe (JaEntregue, Entregue, Anormal, Tratada, Pendente, Saiu)."""
+    ja = entrega_confirmada(base).tolist()
+    conf = dict(zip(ultima[AWB_COL], entrega_confirmada(ultima).tolist()))
+    prob = dict(zip(ultima[AWB_COL], _tem(ultima, PROBLEMA_COL).tolist()))
+    rer = dict(zip(ultima[AWB_COL], reroteada(ultima).tolist()))
+    classes = []
+    for awb, j in zip(base[AWB_COL], ja):
+        if j:
+            c = "JaEntregue"
+        elif awb in conf:
+            c = "Entregue" if conf[awb] else (("Tratada" if rer[awb] else "Anormal") if prob[awb] else "Pendente")
+        else:
+            c = "Entregue" if categoria_saida.get(awb) == "provavel_entrega" else "Saiu"
+        classes.append(c)
+    ent = base[ENTREGADOR_COL].fillna(SEM_ENTREGADOR).tolist() if ENTREGADOR_COL in base.columns else [SEM_ENTREGADOR] * len(base)
+    return pd.DataFrame({AWB_COL: base[AWB_COL].tolist(), "entregador": ent, "classe": classes})
+
+
+def desempenho_progresso(base: pd.DataFrame, ultima: pd.DataFrame, categoria_saida: dict) -> pd.DataFrame:
+    cl = classes_progresso(base, ultima, categoria_saida)
+    linhas = []
+    for ent, g in cl.groupby("entregador", sort=True):
+        n = g["classe"].value_counts()
+        ja = int(n.get("JaEntregue", 0))
+        total = int(len(g)) - ja
+        entregue = int(n.get("Entregue", 0))
+        # arredonda meio-para-cima (igual ao Math.round do motor local -> paridade)
+        pct = float(np.floor(1000 * entregue / total + 0.5) / 10) if total else 0.0
+        linhas.append({"entregador": ent, "total": total, "entregue": entregue, "anormal": int(n.get("Anormal", 0)), "tratada": int(n.get("Tratada", 0)),
+                       "pendente": int(n.get("Pendente", 0)), "pct_entregue": pct, "ja_entregues": ja})
+    return pd.DataFrame(linhas, columns=["entregador", "total", "entregue", "anormal", "tratada", "pendente", "pct_entregue", "ja_entregues"])
 
 
 def linhas_classificadas_entregador(base: pd.DataFrame, ultima: pd.DataFrame, entregues_ids: set[str]) -> pd.DataFrame:

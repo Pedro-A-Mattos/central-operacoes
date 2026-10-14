@@ -5,6 +5,9 @@ RN-012 derivação a partir da base · RN-013 overrides manuais · RN-014 tipos 
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,13 +20,17 @@ ENTREGADOR_COL = "Delivery Associate"
 
 LIMIAR_RUIDO = 3
 MIN_ENTREGADORES_URBANO = 3
-LIMIAR_REGIAO = 10  # padrão do Modo Estudo (histórico grande, confiança alta)
+LIMIAR_REGIAO = 5  # mínimo de entregas para valer numa região (calibrado em hold-out; ver docs/CALIBRACAO_REGIAO.md)
+MIN_PARTICIPACAO = 0.05  # e pelo menos 5% das entregas da região
+MIN_SUPORTE = 20  # região com menos entregas que isto no histórico é "pouco histórico", não "erro provável"
 
 ERRO_CIDADE_AUSENTE = "Cidade ausente"
 ERRO_CIDADE_FORA = "Cidade fora da abrangência"
 ERRO_SEM_ENTREGADOR = "Sem entregador"
 ERRO_FORA_AREA = "Entregador fora da área"
-TIPOS_ERRO = [ERRO_FORA_AREA, ERRO_SEM_ENTREGADOR, ERRO_CIDADE_FORA, ERRO_CIDADE_AUSENTE]
+ERRO_SEM_HISTORICO = "Entregador sem histórico"
+ERRO_POUCO_HISTORICO = "Região com pouco histórico"
+TIPOS_ERRO = [ERRO_FORA_AREA, ERRO_SEM_HISTORICO, ERRO_POUCO_HISTORICO, ERRO_SEM_ENTREGADOR, ERRO_CIDADE_FORA, ERRO_CIDADE_AUSENTE]
 
 
 def _txt(v) -> str | None:
@@ -42,7 +49,9 @@ class RegrasAbrangencia:
     origem_cidade: dict[str, str] = field(default_factory=dict)
 
     def entregadores_validos(self, cidade: str, bairro: str | None) -> tuple[set[str], str]:
-        """Retorna (conjunto válido, escopo) — escopo 'bairro' ou 'cidade'."""
+        """Retorna (conjunto válido, escopo) — escopo 'bairro' ou 'cidade'.
+        Chaves de bairro EXATAS (caixa e acento contam): unificar grafias aqui é decisão pendente
+        (docs/DECISOES_E_VALIDACAO.md §7) e mudaria CA-007/008. O caminho com mapa já normaliza."""
         if cidade in self.cidades_urbanas and bairro and (cidade, bairro) in self.por_bairro:
             return self.por_bairro[(cidade, bairro)], "bairro"
         return self.por_cidade.get(cidade, set()), "cidade"
@@ -153,9 +162,10 @@ def validar_piso(pendentes: pd.DataFrame, regras: RegrasAbrangencia,
 
 
 # =====================================================================
-# Modo Estudo / Validação por REGIÃO (CEP), independente da conferência
-# de piso acima. F1 deriva o mapa região->entregadores; F2 valida uma
-# planilha contra esse mapa. Fallback: CEP -> bairro -> cidade.
+# Estudo / validação por REGIÃO. O mapa região -> entregadores é derivado de um histórico grande
+# (ver scripts/gerar_mapa_regiao.py) e guarda, além dos conjuntos válidos, o SUPORTE de cada regra
+# (quantas entregas a sustentam) e a lista de entregadores conhecidos. CEP e bairro somam; a
+# cidade é o último recurso. Chaves de bairro e cidade são normalizadas (caixa, acento, espaços).
 # =====================================================================
 
 ERRO_REGIAO_FORA = "Entregador fora da região"
@@ -173,116 +183,206 @@ def canon_cep(v) -> str | None:
     return digitos or None
 
 
-def derivar_regras_regiao(base: pd.DataFrame, limiar: int = LIMIAR_REGIAO) -> dict:
-    """F1: mapa de atendimento por região a partir de um histórico grande.
-    Guarda por CEP, por bairro (cidade|bairro) e por cidade — todos os
-    entregadores com >= limiar entregas, mais o dominante de cada região.
-    Permite múltiplos entregadores por região (alta demanda)."""
+def canon_chave(v) -> str | None:
+    """Chave de comparação de cidade/bairro: sem acento, minúscula, espaços colapsados.
+    'Crispim Santana', 'crispim  santana' e 'Crispim santana' viram a mesma região (auditoria M-05)."""
+    s = _txt(v)
+    if s is None:
+        return None
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    return re.sub(r"\s+", " ", s.lower()).strip() or None
+
+
+def _conjunto_regiao(contagem: dict[str, int], limiar: int, min_participacao: float) -> list[str]:
+    """Quem atendeu a região: >= limiar entregas E >= min_participacao do total. O dominante sempre entra
+    (a região precisa de ao menos uma pessoa); a baixa confiança dessa regra aparece no SUPORTE."""
+    total = sum(contagem.values())
+    dominante = sorted(contagem.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+    validos = {e for e, c in contagem.items() if c >= limiar and c / total >= min_participacao}
+    validos.add(dominante)
+    return sorted(validos)
+
+
+def _melhor_grafia(grafias: Counter) -> str:
+    return sorted(grafias.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+
+def derivar_regras_regiao(base: pd.DataFrame, limiar: int = LIMIAR_REGIAO, min_participacao: float = MIN_PARTICIPACAO,
+                          min_suporte: int = MIN_SUPORTE) -> dict:
+    """Mapa de atendimento por região a partir de um histórico: por CEP, por bairro (cidade|bairro) e por
+    cidade. Devolve também o suporte (n de entregas) de cada região e a lista de entregadores vistos."""
+    mapa = {"limiar": int(limiar), "min_participacao": float(min_participacao), "min_suporte": int(min_suporte),
+            "por_cep": {}, "por_bairro": {}, "por_cidade": {},
+            "suporte": {"por_cep": {}, "por_bairro": {}, "por_cidade": {}}, "entregadores": []}
     cols = [c for c in (ZIP_COL, AREA_COL, CIDADE_COL, ENTREGADOR_COL) if c in base.columns]
+    if ENTREGADOR_COL not in cols:
+        return mapa
     df = base[cols].copy()
     for c in cols:
         df[c] = df[c].map(_txt)
-    if ENTREGADOR_COL not in df.columns:
-        return {"limiar": int(limiar), "por_cep": {}, "por_bairro": {}, "por_cidade": {}}
     df = df.dropna(subset=[ENTREGADOR_COL])
 
-    por_cep: dict[str, list[str]] = {}
-    if ZIP_COL in df.columns:
-        d = df.copy()
-        d["_cep"] = d[ZIP_COL].map(canon_cep)
-        d = d.dropna(subset=["_cep"])
-        for cep, g in d.groupby("_cep"):
-            validos = _conjunto_valido(g[ENTREGADOR_COL].value_counts(), limiar)
-            if validos:
-                por_cep[cep] = sorted(validos)
+    cep_c: dict[str, Counter] = {}
+    bai_c: dict[str, Counter] = {}
+    bai_g: dict[str, Counter] = {}
+    cid_c: dict[str, Counter] = {}
+    cid_g: dict[str, Counter] = {}
+    for r in df.to_dict("records"):
+        e = r[ENTREGADOR_COL]
+        cep = canon_cep(r.get(ZIP_COL))
+        if cep:
+            cep_c.setdefault(cep, Counter())[e] += 1
+        cid, bai = r.get(CIDADE_COL), r.get(AREA_COL)
+        cc = canon_chave(cid)
+        if not cc:
+            continue
+        cid_c.setdefault(cc, Counter())[e] += 1
+        cid_g.setdefault(cc, Counter())[cid] += 1
+        bc = canon_chave(bai)
+        if bc:
+            k = cc + "|" + bc
+            bai_c.setdefault(k, Counter())[e] += 1
+            bai_g.setdefault(k, Counter())[f"{cid}|{bai}"] += 1
 
-    por_bairro: dict[str, list[str]] = {}
-    if AREA_COL in df.columns and CIDADE_COL in df.columns:
-        d = df.dropna(subset=[AREA_COL, CIDADE_COL])
-        for (cidade, bairro), g in d.groupby([CIDADE_COL, AREA_COL]):
-            validos = _conjunto_valido(g[ENTREGADOR_COL].value_counts(), limiar)
-            if validos:
-                por_bairro[f"{cidade}|{bairro}"] = sorted(validos)
+    for chave in sorted(cep_c):
+        mapa["por_cep"][chave] = _conjunto_regiao(cep_c[chave], limiar, min_participacao)
+        mapa["suporte"]["por_cep"][chave] = sum(cep_c[chave].values())
+    for k in sorted(bai_c, key=lambda k: _melhor_grafia(bai_g[k])):
+        nome = _melhor_grafia(bai_g[k])
+        mapa["por_bairro"][nome] = _conjunto_regiao(bai_c[k], limiar, min_participacao)
+        mapa["suporte"]["por_bairro"][nome] = sum(bai_c[k].values())
+    for k in sorted(cid_c, key=lambda k: _melhor_grafia(cid_g[k])):
+        nome = _melhor_grafia(cid_g[k])
+        mapa["por_cidade"][nome] = _conjunto_regiao(cid_c[k], limiar, min_participacao)
+        mapa["suporte"]["por_cidade"][nome] = sum(cid_c[k].values())
+    mapa["entregadores"] = sorted(set(df[ENTREGADOR_COL]))
+    return mapa
 
-    por_cidade: dict[str, list[str]] = {}
-    if CIDADE_COL in df.columns:
-        d = df.dropna(subset=[CIDADE_COL])
-        for cidade, g in d.groupby(CIDADE_COL):
-            validos = _conjunto_valido(g[ENTREGADOR_COL].value_counts(), limiar)
-            if validos:
-                por_cidade[cidade] = sorted(validos)
 
-    return {"limiar": int(limiar),
-            "por_cep": {k: por_cep[k] for k in sorted(por_cep)},
-            "por_bairro": {k: por_bairro[k] for k in sorted(por_bairro)},
-            "por_cidade": {k: por_cidade[k] for k in sorted(por_cidade)}}
+def _indexar_mapa(mapa: dict) -> dict:
+    """Índice de consulta com chaves normalizadas. Mapas antigos, com grafias duplicadas, viram a UNIÃO.
+    Cada entrada é (conjunto de entregadores, suporte|None); o suporte é None em mapas sem 'suporte'."""
+    sup = mapa.get("suporte") or {}
+
+    def junta(d, suporte, chave_fn):
+        out: dict = {}
+        for k, v in (d or {}).items():
+            ck = chave_fn(k)
+            if ck is None:
+                continue
+            conj, n = out.get(ck, (set(), None))
+            s = (suporte or {}).get(k)
+            out[ck] = (conj | set(v), n if s is None else (n or 0) + s)
+        return out
+
+    def chave_bairro(k):
+        cid, _, bai = str(k).partition("|")
+        cc, bc = canon_chave(cid), canon_chave(bai)
+        return f"{cc}|{bc}" if cc and bc else None
+
+    conhecidos = mapa.get("entregadores")
+    return {"cep": junta(mapa.get("por_cep"), sup.get("por_cep"), canon_cep),
+            "bairro": junta(mapa.get("por_bairro"), sup.get("por_bairro"), chave_bairro),
+            "cidade": junta(mapa.get("por_cidade"), sup.get("por_cidade"), canon_chave),
+            "conhecidos": set(conhecidos) if conhecidos else None,
+            "min_suporte": int(mapa.get("min_suporte") or 0)}
+
+
+def _maior(a, b):
+    xs = [x for x in (a, b) if x is not None]
+    return max(xs) if xs else None
+
+
+def _resolver_regiao(idx: dict, cep, bairro, cidade) -> tuple[set[str], str, bool, int | None]:
+    """Resolve a regra de uma linha. CEP e bairro SOMAM: vale quem atende o CEP OU o bairro, porque um CEP
+    genérico (ex.: o da sede) cobre distritos que o bairro distingue. A cidade só entra quando nenhum dos
+    dois tem regra. Retorna (conjunto, escopo, tem_regra, suporte); escopo: cep, bairro, cep+bairro, cidade."""
+    c, cc, bc = canon_cep(cep), canon_chave(cidade), canon_chave(bairro)
+    do_cep = idx["cep"].get(c) if c else None
+    do_bairro = idx["bairro"].get(f"{cc}|{bc}") if cc and bc else None
+    if do_cep is not None and do_bairro is not None:
+        return do_cep[0] | do_bairro[0], "cep+bairro", True, _maior(do_cep[1], do_bairro[1])
+    if do_cep is not None:
+        return do_cep[0], "cep", True, do_cep[1]
+    if do_bairro is not None:
+        return do_bairro[0], "bairro", True, do_bairro[1]
+    if cc and cc in idx["cidade"]:
+        v, n = idx["cidade"][cc]
+        return set(v), "cidade", True, n
+    return set(), "regiao", False, None
 
 
 def _validos_regiao(mapa: dict, cep, bairro, cidade) -> tuple[set[str], str, bool]:
-    """Resolve a regra para uma linha com fallback CEP -> bairro -> cidade.
-    Retorna (conjunto, escopo, tem_regra)."""
-    c = canon_cep(cep)
-    if c and c in (mapa.get("por_cep") or {}):
-        return set(mapa["por_cep"][c]), "cep", True
-    b = _txt(bairro)
-    ci = _txt(cidade)
-    if ci and b and f"{ci}|{b}" in (mapa.get("por_bairro") or {}):
-        return set(mapa["por_bairro"][f"{ci}|{b}"]), "bairro", True
-    if ci and ci in (mapa.get("por_cidade") or {}):
-        return set(mapa["por_cidade"][ci]), "cidade", True
-    return set(), "regiao", False
+    """Compatibilidade: igual a _resolver_regiao, sem o suporte."""
+    v, esc, ok, _ = _resolver_regiao(_indexar_mapa(mapa), cep, bairro, cidade)
+    return v, esc, ok
 
 
 def validar_regiao(df: pd.DataFrame, mapa: dict) -> pd.DataFrame:
-    """F2: audita a atribuição de cada linha contra o mapa de regiões.
+    """Modo Validação (tela Estudo de regiões): audita a atribuição de cada linha contra o mapa.
     Aponta 'sem entregador', 'fora da região' e 'região sem regra'."""
+    idx = _indexar_mapa(mapa)
     erros = []
     for _, linha in df.iterrows():
-        validos, escopo, tem_regra = _validos_regiao(
-            mapa, linha.get(ZIP_COL), linha.get(AREA_COL), linha.get(CIDADE_COL))
+        validos, escopo, tem_regra, _sup = _resolver_regiao(idx, linha.get(ZIP_COL), linha.get(AREA_COL), linha.get(CIDADE_COL))
         entregador = _txt(linha.get(ENTREGADOR_COL))
         if not tem_regra:
             d = _erro(linha, ERRO_REGIAO_SEM_REGRA, "Região sem regra no mapeamento; não dá para julgar.", None)
-            d["escopo"] = escopo
-            erros.append(d)
-            continue
-        if not entregador:
+        elif not entregador:
             d = _erro(linha, ERRO_REGIAO_SEM_ENTREGADOR, "Entrega sem entregador atribuído.", validos)
-            d["escopo"] = escopo
-            erros.append(d)
-            continue
-        if entregador not in validos:
+        elif entregador not in validos:
             d = _erro(linha, ERRO_REGIAO_FORA, f"{entregador} não costuma atender esta região.", validos)
-            d["escopo"] = escopo
-            erros.append(d)
+        else:
+            continue
+        d["escopo"] = escopo
+        erros.append(d)
     colunas = list(df.columns) + ["tipo_erro", "detalhe", "entregadores_esperados", "escopo"]
     return pd.DataFrame(erros, columns=colunas)
 
 
-def validar_piso_por_regiao(pendentes: pd.DataFrame, mapa: dict,
-                            cidades_ignoradas: list[str] | None = None) -> pd.DataFrame:
-    """Conferência de piso usando o MAPA DE REGIÃO (CEP->bairro->cidade). Reaproveita
-    os MESMOS tipos de erro da conferência de piso para a tela não mudar."""
+def validar_piso_por_regiao(pendentes: pd.DataFrame, mapa: dict, cidades_ignoradas: list[str] | None = None,
+                            overrides: dict | None = None) -> pd.DataFrame:
+    """Conferência de piso com o MAPA DE REGIÃO. Ordem de autoridade:
+      1. Ajuste manual por cidade (`overrides.por_cidade`): prevalece sobre o mapa (OP-05).
+      2. Mapa: CEP e bairro somam; cidade como último recurso.
+    Veredito, do mais ao menos firme: 'Entregador fora da área' (regra com suporte suficiente);
+    'Região com pouco histórico' (suporte abaixo do mínimo); 'Entregador sem histórico' (nome que não
+    aparece no histórico que gerou o mapa: pode ser entregador novo, não necessariamente erro)."""
     ignoradas = set(cidades_ignoradas or [])
+    manual = (overrides or {}).get("por_cidade") or {}
+    idx = _indexar_mapa(mapa)
     erros = []
     for _, linha in pendentes.iterrows():
         cidade = _txt(linha.get(CIDADE_COL))
         if cidade in ignoradas:
             continue
-        validos, escopo, tem_regra = _validos_regiao(
-            mapa, linha.get(ZIP_COL), linha.get(AREA_COL), linha.get(CIDADE_COL))
-        if not tem_regra:
-            d = _erro(linha, ERRO_CIDADE_FORA, "Região (CEP/bairro/cidade) sem regra no mapeamento do estudo.", None)
-        else:
-            entregador = _txt(linha.get(ENTREGADOR_COL))
+        entregador = _txt(linha.get(ENTREGADOR_COL))
+        origem = "mapa de região"
+        if cidade in manual:
+            origem = "ajuste manual"
+            validos, escopo = set(manual[cidade]), "cidade"
             if not entregador:
                 d = _erro(linha, ERRO_SEM_ENTREGADOR, "Peça sem entregador atribuído.", validos)
             elif entregador not in validos:
-                d = _erro(linha, ERRO_FORA_AREA, f"{entregador} não costuma atender esta região.", validos)
+                d = _erro(linha, ERRO_FORA_AREA, f"{entregador} não está no ajuste manual de {cidade}.", validos)
             else:
                 continue
+        else:
+            validos, escopo, tem_regra, suporte = _resolver_regiao(idx, linha.get(ZIP_COL), linha.get(AREA_COL), linha.get(CIDADE_COL))
+            if not tem_regra:
+                d = _erro(linha, ERRO_CIDADE_FORA, "Região (CEP/bairro/cidade) sem regra no mapeamento do estudo.", None)
+            elif not entregador:
+                d = _erro(linha, ERRO_SEM_ENTREGADOR, "Peça sem entregador atribuído.", validos)
+            elif entregador in validos:
+                continue
+            elif idx["conhecidos"] is not None and entregador not in idx["conhecidos"]:
+                d = _erro(linha, ERRO_SEM_HISTORICO, f"{entregador} não aparece no histórico que gerou o mapa de região (entregador novo?).", validos)
+            elif suporte is not None and idx["min_suporte"] and suporte < idx["min_suporte"]:
+                d = _erro(linha, ERRO_POUCO_HISTORICO, f"Região com poucas entregas no histórico ({suporte}); {entregador} não está entre quem atendeu.", validos)
+            else:
+                d = _erro(linha, ERRO_FORA_AREA, f"{entregador} não costuma atender esta região.", validos)
         d["escopo"] = escopo
-        d["origem_regra"] = "mapa de região"
+        d["origem_regra"] = origem
         erros.append(d)
     colunas = list(pendentes.columns) + ["tipo_erro", "detalhe", "entregadores_esperados", "escopo", "origem_regra"]
     return pd.DataFrame(erros, columns=colunas)

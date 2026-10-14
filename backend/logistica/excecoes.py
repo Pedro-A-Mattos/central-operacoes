@@ -22,6 +22,7 @@ LIMITE_AUSENTES = 3
 MOTIVOS_DEVOLUCAO = ("não recebido", "nao recebido", "local fechado", "telefone não atendido",
                      "telefone nao atendido", "telefone errado", "recusad", "ausente")
 PALAVRAS_EXTRAVIO = ("lost", "extravi")
+PALAVRAS_AVARIA = ("avaria", "danific")
 CONTAGEM_COL = "Delivery Count"
 
 
@@ -48,6 +49,14 @@ def _mask_extravio(df: pd.DataFrame) -> pd.Series:
     texto = _texto(df)
     mask = pd.Series(False, index=df.index)
     for p in PALAVRAS_EXTRAVIO:
+        mask |= texto.str.contains(p, regex=False).fillna(False)
+    return mask.astype(bool)
+
+
+def _mask_avaria(df: pd.DataFrame) -> pd.Series:
+    texto = _texto(df)
+    mask = pd.Series(False, index=df.index)
+    for p in PALAVRAS_AVARIA:
         mask |= texto.str.contains(p, regex=False).fillna(False)
     return mask.astype(bool)
 

@@ -134,3 +134,16 @@ def reativar(awb: str):
 @app.get("/")
 def interface():
     return FileResponse(FRONT)
+
+
+# Arquivos de frontend/public/ que o GitHub Pages publica junto do site. Sem eles
+# o localhost não carrega o mapa de região padrão e confere o piso por outra regra.
+PUBLICO = Path(__file__).resolve().parents[2] / "frontend" / "public"
+ARQUIVOS_PUBLICOS = ("regras_regiao.b64", "regras_regiao.json", "regras_piso.json")
+
+
+@app.get("/{nome}")
+def arquivo_publico(nome: str):
+    if nome not in ARQUIVOS_PUBLICOS or not (PUBLICO / nome).is_file():
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    return FileResponse(PUBLICO / nome)
