@@ -5,9 +5,9 @@ type Tela = "importar" | "torre" | "piso" | "excecoes" | "pendencias" | "entrega
 
 interface SelecaoGrafico { dim: "cidade" | "entregador" | "faixa" | "problema" | "classe" | "rota"; valor: string; rotulo: string }
 
-interface FiltrosPend { cidades: string[]; bairros: string[]; classes: string[]; faixas: string[]; rota: string[]; dias: string[]; soProblema: boolean; semEntregador: boolean; sel: SelecaoGrafico | null }
+interface FiltrosPend { ocorrencia: "" | "vigente" | "tratada"; cidades: string[]; bairros: string[]; classes: string[]; faixas: string[]; rota: string[]; dias: string[]; soProblema: boolean; semEntregador: boolean; sel: SelecaoGrafico | null }
 interface FiltrosPiso { tipos: string[]; cidades: string[]; bairros: string[]; entregadores: string[]; vista?: "tabela" | "roteiro" }
-interface FiltrosExc { aba: TipoExcecao | "justificados"; cidades: string[]; bairros: string[]; entregadores: string[] }
+interface FiltrosExc { aba: AbaPend; cidades: string[]; bairros: string[]; entregadores: string[] }
 interface FiltrosEnt { dias: string[]; ordem: "total" | "pct_desc" | "pct_asc" | "anormal" | "pendente" | "rua"; sel: { entregador: string; classe: string | null } | null; realce: string | null }
 
 type RefAwb =
@@ -16,12 +16,12 @@ type RefAwb =
   | { fonte: "fora_atual" | "fora_base"; dados: Dados };
 
 const filtrosVazios = () => ({
-  pendencias: { cidades: [], bairros: [], classes: [], faixas: [], rota: [], dias: [], soProblema: false, semEntregador: false, sel: null } as FiltrosPend,
+  pendencias: { ocorrencia: "", cidades: [], bairros: [], classes: [], faixas: [], rota: [], dias: [], soProblema: false, semEntregador: false, sel: null } as FiltrosPend,
   piso: { tipos: [], cidades: [], bairros: [], entregadores: [] } as FiltrosPiso,
-  excecoes: { aba: "devolucao", cidades: [], bairros: [], entregadores: [] } as FiltrosExc,
+  excecoes: { aba: "atrasadas", cidades: [], bairros: [], entregadores: [] } as FiltrosExc,
   entregadores: { dias: [], ordem: "total", sel: null, realce: null } as FiltrosEnt,
   aEntregar: { cidade: "", entregador: "" },
-  mudancas: { aba: "provavel_entrega" as "provavel_entrega" | "possivel_devolucao" | "novas" | "status" },
+  mudancas: { aba: "provavel_entrega" as "provavel_entrega" | "possivel_devolucao" | "ja_entregue" | "saiu_com_ocorrencia" | "novas" | "status" },
   fora: { aba: "atual" as "atual" | "base" },
 });
 
@@ -52,11 +52,11 @@ const E = {
   menuAberto: false,
   exemplo: false,
   historico: [] as RegistroImportacao[],
-  mapa: { cidade: "", entregador: "", cor: "situacao" as "situacao" | "espera" | "rota", modo: "mapa" as "mapa" | "esquema" },
+  mapa: { cidade: "", entregador: "", cor: "situacao" as "situacao" | "espera" | "rota", modo: "mapa" as "mapa" | "esquema", semCoordAberto: null as boolean | null },
   overrides: { por_cidade: {}, cidades_ignoradas: [] } as Overrides,
   estudo: {
     arquivo: null as ValidacaoArquivo | null, lendo: false, erro: null as ProblemaArquivo | null,
-    limiar: 10, mapa: null as MapaRegiao | null, processando: false, aba: "cep" as "cep" | "entregador",
+    limiar: 5, mapa: null as MapaRegiao | null, aplicado: null as { antes: number | null; depois: number | null; limiar: number } | null, processando: false, aba: "cep" as "cep" | "entregador",
   },
   // Mapa de região ATIVO usado pela Conferência de piso (null = regra derivada da base).
   // Padrão: regras_regiao.json publicado; a tela de Estudo pode substituir na sessão.
@@ -68,7 +68,7 @@ let renderizar: () => void = () => {};
 function atualizar(fn?: () => void) { if (fn) fn(); renderizar(); }
 
 const TITULOS: Record<Tela, string> = {
-  importar: "Nova importação", torre: "Torre de controle", piso: "Conferência de piso", excecoes: "Exceções",
+  importar: "Nova importação", torre: "Torre de controle", piso: "Conferência de piso", excecoes: "Pendências de entrega",
   pendencias: "Pendências", entregadores: "Entregadores", historico: "Histórico", mapa: "Mapa", "a-entregar": "Encomendas a entregar", mudancas: "O que mudou",
   fora: "Fora da jurisdição", regras: "Regras de abrangência", criterios: "Importação e critérios",
   "nao-recebido": "Não recebido, mas entregue", estudo: "Estudo de regiões",
@@ -98,8 +98,27 @@ function indexar(a: Analise) {
 // ---------- recortes derivados ----------
 const awbDe = (d: Dados) => String(d["Waybill No"]);
 const justificada = (awb: string) => !!E.analise && !!E.analise.justificativas[awb];
-const excAtivas = (t: TipoExcecao) => (E.analise ? E.analise.atual.filter((r) => r.excecoes.includes(t) && !justificada(awbDe(r.dados))) : []);
-const excJustificadas = () => (E.analise ? E.analise.atual.filter((r) => r.excecoes.length && justificada(awbDe(r.dados))) : []);
+
+// ---------- Pendências de entrega: o que o coordenador precisa fazer ----------
+// Regra do operador por número de tentativas: 1 → colocar em rota de novo; 2 → rota de
+// novo e ver com o entregador se devolve; 3 → processo de devolução. Quem já saiu de
+// novo para entrega depois da ocorrência (`reroteada`) sai das listas de ação.
+type AcaoPend = "atrasadas" | "tent1" | "tent2" | "tent3" | "extravio" | "ja_em_rota";
+type AbaPend = AcaoPend | "justificados";
+const DIAS_ATRASO = 2;
+const tentativasDe = (r: RegAtual) => Number(r.dados["Delivery Count"]) || 0;
+const PEND: Record<AcaoPend, (r: RegAtual) => boolean> = {
+  atrasadas: (r) => r.backlog_dias !== null && r.backlog_dias >= DIAS_ATRASO && !r.entrega_confirmada,
+  tent1: (r) => r.excecoes.includes("insucesso") && tentativasDe(r) <= 1 && !r.reroteada && !r.entrega_confirmada,
+  tent2: (r) => r.excecoes.includes("insucesso") && tentativasDe(r) === 2 && !r.reroteada && !r.entrega_confirmada,
+  tent3: (r) => (r.excecoes.includes("devolucao") || r.excecoes.includes("revisar_tentativas")) && !r.entrega_confirmada,
+  extravio: (r) => r.excecoes.includes("extravio"),
+  ja_em_rota: (r) => r.excecoes.includes("insucesso") && r.reroteada && !r.entrega_confirmada,
+};
+const ACOES_URGENTES: AcaoPend[] = ["atrasadas", "tent1", "tent2", "tent3", "extravio"];
+const pendAtivas = (a: AcaoPend) => (E.analise ? E.analise.atual.filter((r) => PEND[a](r) && !justificada(awbDe(r.dados))) : []);
+const pendPrecisaAcao = (r: RegAtual) => !justificada(awbDe(r.dados)) && ACOES_URGENTES.some((a) => PEND[a](r));
+const pendJustificadas = () => (E.analise ? E.analise.atual.filter((r) => justificada(awbDe(r.dados)) && (r.excecoes.length || PEND.atrasadas(r))) : []);
 const errosPiso = () => (E.analise ? E.analise.atual.filter((r) => r.erro_piso) : []);
 
 function contar<T>(itens: T[], chave: (x: T) => string | null): { rotulo: string; valor: number }[] {

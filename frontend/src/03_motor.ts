@@ -20,6 +20,7 @@ const canonFm = (v: Valor | undefined): string =>
 const ehFm = (v: Valor | undefined): boolean => RE_FM.test(canonFm(v));
 const PALAVRAS_DEVOLUCAO = ["devol", "não recebido", "nao recebido", "recusad", "retorno"];
 const PALAVRAS_EXTRAVIO = ["lost", "extravi"];
+const PALAVRAS_AVARIA = ["avaria", "danific"];
 const STATUS_ENTREGUE = new Set(["entregue", "assinado", "signed", "delivered"]);
 const FAIXAS: Faixa[] = ["0-1 dia", "2-3 dias", "4+ dias"];
 const LIMIAR_RUIDO_PADRAO = 3, MIN_URBANO = 3, LIMITE_TENTATIVAS = 3;
@@ -52,12 +53,18 @@ const txt = (v: Valor | undefined): string | null => { if (ehNulo(v)) return nul
 const temValor = (v: Valor | undefined) => !ehNulo(v) && String(v).trim() !== "";
 const minus = (v: Valor | undefined) => (ehNulo(v) ? "" : String(v)).toLowerCase();
 
+// Datas aceitas: ISO (aaaa-mm-dd[ T]hh:mm[:ss]) e brasileira (dd/mm/aaaa[ hh:mm[:ss]]). Outra coisa = sem data.
+// Mesma regra de comparador.para_data (auditoria M-04): nunca se adivinha dia/mês.
+const RE_DATA = /^\s*(?:(\d{4})-(\d{2})-(\d{2})|(\d{2})\/(\d{2})\/(\d{4}))(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?\s*$/;
 function paraData(v: Valor | undefined): Date | null {
   if (ehNulo(v)) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(String(v).trim());
+  const m = RE_DATA.exec(String(v));
   if (!m) return null;
-  const d = new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
-  return Number.isNaN(d.getTime()) ? null : d;
+  const ano = +(m[1] || m[6]), mes = +(m[2] || m[5]), dia = +(m[3] || m[4]);
+  const hh = +(m[7] || 0), mi = +(m[8] || 0), ss = +(m[9] || 0);
+  if (hh > 23 || mi > 59 || ss > 59) return null;
+  const d = new Date(ano, mes - 1, dia, hh, mi, ss);
+  return Number.isNaN(d.getTime()) || d.getMonth() !== mes - 1 || d.getDate() !== dia ? null : d;
 }
 const diaIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const dataHoraIso = (d: Date) => `${diaIso(d)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
@@ -75,14 +82,19 @@ function normalizarRelatorio(t: Tabela): Dados[] {
     significado: "Sem a coluna 'Waybill No' não é possível comparar os relatórios.",
     acao: "Exporte novamente o relatório Dispatch completo, sem remover colunas.",
   });
-  const ultimaPos = new Map<string, number>();
+  // AWB repetida: vale o registro de evento mais recente; em empate (ou sem datas), a última linha (auditoria M-02).
+  const melhor = new Map<string, { pos: number; t: number }>();
   const linhas: Dados[] = [];
   for (const l of t.linhas) {
     const awb = normalizarAwb(l[AWB]);
     if (!awb) continue;
-    const r = { ...l, [AWB]: awb };
-    if (ultimaPos.has(awb)) linhas[ultimaPos.get(awb)!] = null as unknown as Dados;
-    ultimaPos.set(awb, linhas.length);
+    const r: Dados = { ...l, [AWB]: awb };
+    let tt = -Infinity;
+    for (const c of COLUNAS_EVENTO) { const d = paraData(r[c]); if (d && d.getTime() > tt) tt = d.getTime(); }
+    const ant = melhor.get(awb);
+    if (ant && tt < ant.t) continue; // o registro anterior é mais recente
+    if (ant) linhas[ant.pos] = null as unknown as Dados;
+    melhor.set(awb, { pos: linhas.length, t: tt });
     linhas.push(r);
   }
   return linhas.filter(Boolean);
@@ -190,9 +202,10 @@ function derivarRegras(base: Dados[], limiar: number): Regras {
   return rg;
 }
 
-// ---------- Modo Estudo / Validação por REGIÃO (CEP) — espelha regras.py ----------
+// ---------- Estudo / validação por REGIÃO — espelha regras.py ----------
 const ZIP = "Consignee Zip Code";
-const LIMIAR_REGIAO_PADRAO = 10;
+const LIMIAR_REGIAO_PADRAO = 5, MIN_PARTICIPACAO_PADRAO = 0.05, MIN_SUPORTE_PADRAO = 20;
+const ERRO_SEM_HISTORICO = "Entregador sem histórico", ERRO_POUCO_HISTORICO = "Região com pouco histórico";
 
 function canonCep(v: Valor | undefined): string | null {
   const s = txt(v);
@@ -200,46 +213,88 @@ function canonCep(v: Valor | undefined): string | null {
   const d = s.replace(/\D/g, "");
   return d || null;
 }
-function contarPor(rows: Dados[]): Map<string, number> {
-  const m = new Map<string, number>();
-  for (const r of rows) { const e = txt(r[ENTREG]); if (!e) continue; m.set(e, (m.get(e) || 0) + 1); }
-  return m;
+// Chave de comparação de cidade/bairro (espelha regras.canon_chave): sem acento, minúscula, espaços colapsados.
+function canonChave(v: Valor | undefined): string | null {
+  const s = txt(v);
+  if (s === null) return null;
+  return s.normalize("NFKD").replace(/[^\x00-\x7f]/g, "").toLowerCase().replace(/\s+/g, " ").trim() || null;
 }
-function derivarRegiaoLocal(base: Dados[], limiar: number): MapaRegiao {
-  const com = base.filter((r) => txt(r[ENTREG]));
-  const porCep: Record<string, string[]> = {};
-  const grpCep = new Map<string, Dados[]>();
-  for (const r of com) { const c = canonCep(r[ZIP]); if (!c) continue; (grpCep.get(c) || grpCep.set(c, []).get(c)!).push(r); }
-  for (const [c, rows] of grpCep) { const v = conjuntoValido(contarPor(rows), limiar); if (v.size) porCep[c] = [...v].sort(); }
-  const porBairro: Record<string, string[]> = {};
-  const grpB = new Map<string, Dados[]>();
-  for (const r of com) { const ci = txt(r[CIDADE]), b = txt(r[AREA]); if (!ci || !b) continue; const k = ci + "|" + b; (grpB.get(k) || grpB.set(k, []).get(k)!).push(r); }
-  for (const [k, rows] of grpB) { const v = conjuntoValido(contarPor(rows), limiar); if (v.size) porBairro[k] = [...v].sort(); }
-  const porCidade: Record<string, string[]> = {};
-  const grpC = new Map<string, Dados[]>();
-  for (const r of com) { const ci = txt(r[CIDADE]); if (!ci) continue; (grpC.get(ci) || grpC.set(ci, []).get(ci)!).push(r); }
-  for (const [ci, rows] of grpC) { const v = conjuntoValido(contarPor(rows), limiar); if (v.size) porCidade[ci] = [...v].sort(); }
-  const ordenar = (o: Record<string, string[]>): Record<string, string[]> => {
-    const out: Record<string, string[]> = {};
-    for (const k of Object.keys(o).sort()) out[k] = o[k];
-    return out;
-  };
-  return { limiar: Math.round(limiar), por_cep: ordenar(porCep), por_bairro: ordenar(porBairro), por_cidade: ordenar(porCidade) };
+const cmpTxt = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+// Quem atendeu a região: >= limiar entregas E >= minPart do total; o dominante sempre entra.
+function conjuntoRegiao(cont: Map<string, number>, limiar: number, minPart: number): string[] {
+  let total = 0; for (const n of cont.values()) total += n;
+  const dom = [...cont].sort((a, b) => b[1] - a[1] || cmpTxt(a[0], b[0]))[0][0];
+  const s = new Set<string>([dom]);
+  for (const [e, n] of cont) if (n >= limiar && n / total >= minPart) s.add(e);
+  return [...s].sort();
 }
+const melhorGrafia = (m: Map<string, number>) => [...m].sort((a, b) => b[1] - a[1] || cmpTxt(a[0], b[0]))[0][0];
+function derivarRegiaoLocal(base: Dados[], limiar: number, minPart = MIN_PARTICIPACAO_PADRAO, minSuporte = MIN_SUPORTE_PADRAO): MapaRegiao {
+  const mapa: MapaRegiao = { limiar: Math.round(limiar), min_participacao: minPart, min_suporte: Math.round(minSuporte), por_cep: {}, por_bairro: {}, por_cidade: {},
+    suporte: { por_cep: {}, por_bairro: {}, por_cidade: {} }, entregadores: [] };
+  const cepC = new Map<string, Map<string, number>>(), baiC = new Map<string, Map<string, number>>(), baiG = new Map<string, Map<string, number>>();
+  const cidC = new Map<string, Map<string, number>>(), cidG = new Map<string, Map<string, number>>();
+  const inc = (m: Map<string, Map<string, number>>, k: string, e: string) => { let x = m.get(k); if (!x) m.set(k, (x = new Map())); x.set(e, (x.get(e) || 0) + 1); };
+  const ents = new Set<string>();
+  for (const r of base) {
+    const e = txt(r[ENTREG]); if (!e) continue;
+    ents.add(e);
+    const cep = canonCep(r[ZIP]); if (cep) inc(cepC, cep, e);
+    const cid = txt(r[CIDADE]), bai = txt(r[AREA]), cc = canonChave(cid);
+    if (!cc) continue;
+    inc(cidC, cc, e); inc(cidG, cc, cid!);
+    const bc = canonChave(bai);
+    if (bc) { const k = cc + "|" + bc; inc(baiC, k, e); inc(baiG, k, `${cid}|${bai}`); }
+  }
+  const soma = (m: Map<string, number>) => { let t = 0; for (const n of m.values()) t += n; return t; };
+  for (const c of [...cepC.keys()].sort()) { mapa.por_cep[c] = conjuntoRegiao(cepC.get(c)!, limiar, minPart); mapa.suporte!.por_cep[c] = soma(cepC.get(c)!); }
+  const porNome = (cont: Map<string, Map<string, number>>, graf: Map<string, Map<string, number>>) =>
+    [...cont.keys()].map((k) => ({ k, nome: melhorGrafia(graf.get(k)!) })).sort((a, b) => cmpTxt(a.nome, b.nome));
+  for (const { k, nome } of porNome(baiC, baiG)) { mapa.por_bairro[nome] = conjuntoRegiao(baiC.get(k)!, limiar, minPart); mapa.suporte!.por_bairro[nome] = soma(baiC.get(k)!); }
+  for (const { k, nome } of porNome(cidC, cidG)) { mapa.por_cidade[nome] = conjuntoRegiao(cidC.get(k)!, limiar, minPart); mapa.suporte!.por_cidade[nome] = soma(cidC.get(k)!); }
+  mapa.entregadores = [...ents].sort();
+  return mapa;
+}
+
 interface ErroRegiao extends ErroRegiaoReg {}
 const ERRO_REG_FORA = "Entregador fora da região", ERRO_REG_SEM_ENT = "Sem entregador", ERRO_REG_SEM_REGRA = "Região sem regra conhecida";
-function validosRegiao(mapa: MapaRegiao, cep: Valor | undefined, bairro: Valor | undefined, cidade: Valor | undefined): [Set<string>, string, boolean] {
-  const c = canonCep(cep);
-  if (c && mapa.por_cep[c]) return [new Set(mapa.por_cep[c]), "cep", true];
-  const b = txt(bairro), ci = txt(cidade);
-  if (ci && b && mapa.por_bairro[ci + "|" + b]) return [new Set(mapa.por_bairro[ci + "|" + b]), "bairro", true];
-  if (ci && mapa.por_cidade[ci]) return [new Set(mapa.por_cidade[ci]), "cidade", true];
-  return [new Set(), "regiao", false];
+// Índice de consulta com chaves normalizadas (espelha regras._indexar_mapa). Mapas antigos com grafias duplicadas viram a união.
+type EntradaIdx = [Set<string>, number | null];
+interface IndiceMapa { cep: Map<string, EntradaIdx>; bairro: Map<string, EntradaIdx>; cidade: Map<string, EntradaIdx>; conhecidos: Set<string> | null; minSuporte: number }
+function indexarMapa(mapa: MapaRegiao): IndiceMapa {
+  const junta = (d: Record<string, string[]> | undefined, sup: Record<string, number> | undefined, fn: (k: string) => string | null) => {
+    const out = new Map<string, EntradaIdx>();
+    for (const [k, v] of Object.entries(d || {})) {
+      const ck = fn(k); if (ck === null) continue;
+      const [conj, n] = out.get(ck) || [new Set<string>(), null];
+      const sv = sup ? sup[k] : undefined;
+      out.set(ck, [new Set([...conj, ...v]), sv === undefined ? n : (n ?? 0) + sv]);
+    }
+    return out;
+  };
+  const chaveBairro = (k: string) => { const i = k.indexOf("|"); const cc = canonChave(i < 0 ? k : k.slice(0, i)), bc = canonChave(i < 0 ? "" : k.slice(i + 1)); return cc && bc ? `${cc}|${bc}` : null; };
+  const sup = mapa.suporte;
+  return { cep: junta(mapa.por_cep, sup?.por_cep, canonCep), bairro: junta(mapa.por_bairro, sup?.por_bairro, chaveBairro), cidade: junta(mapa.por_cidade, sup?.por_cidade, canonChave),
+    conhecidos: mapa.entregadores && mapa.entregadores.length ? new Set(mapa.entregadores) : null, minSuporte: Math.round(mapa.min_suporte || 0) };
+}
+const maiorSup = (a: number | null, b: number | null) => (a === null ? b : b === null ? a : Math.max(a, b));
+// CEP e bairro somam (vale quem atende o CEP OU o bairro); a cidade é o último recurso (espelha regras._resolver_regiao).
+function resolverRegiao(idx: IndiceMapa, cep: Valor | undefined, bairro: Valor | undefined, cidade: Valor | undefined): { validos: Set<string>; escopo: string; temRegra: boolean; suporte: number | null } {
+  const c = canonCep(cep), cc = canonChave(cidade), bc = canonChave(bairro);
+  const doCep = c ? idx.cep.get(c) : undefined;
+  const doBairro = cc && bc ? idx.bairro.get(`${cc}|${bc}`) : undefined;
+  if (doCep && doBairro) return { validos: new Set([...doCep[0], ...doBairro[0]]), escopo: "cep+bairro", temRegra: true, suporte: maiorSup(doCep[1], doBairro[1]) };
+  if (doCep) return { validos: new Set(doCep[0]), escopo: "cep", temRegra: true, suporte: doCep[1] };
+  if (doBairro) return { validos: new Set(doBairro[0]), escopo: "bairro", temRegra: true, suporte: doBairro[1] };
+  const doCid = cc ? idx.cidade.get(cc) : undefined;
+  if (doCid) return { validos: new Set(doCid[0]), escopo: "cidade", temRegra: true, suporte: doCid[1] };
+  return { validos: new Set(), escopo: "regiao", temRegra: false, suporte: null };
 }
 function validarRegiaoLocal(rows: Dados[], mapa: MapaRegiao): ErroRegiao[] {
+  const idx = indexarMapa(mapa);
   const out: ErroRegiao[] = [];
   for (const r of rows) {
-    const [validos, escopo, temRegra] = validosRegiao(mapa, r[ZIP], r[AREA], r[CIDADE]);
+    const { validos, escopo, temRegra } = resolverRegiao(idx, r[ZIP], r[AREA], r[CIDADE]);
     const ent = txt(r[ENTREG]);
     const base = { awb: String(r[AWB]), dados: r, esperados: [...validos].sort(), escopo };
     if (!temRegra) out.push({ ...base, tipo: ERRO_REG_SEM_REGRA, detalhe: "Região sem regra no mapeamento; não dá para julgar." });
@@ -261,20 +316,35 @@ function validos(rg: Regras, c: string, b: string | null): [Set<string>, "bairro
   return [rg.porCidade.get(c) || new Set(), "cidade"];
 }
 
-// Conferência de piso usando o MAPA DE REGIÃO (CEP->bairro->cidade), quando houver.
-// Reaproveita os mesmos tipos de erro da conferência de piso para a tela não mudar.
-function validarPisoPorRegiao(pend: Dados[], mapa: MapaRegiao, ignoradas: string[]): Map<string, ErroPiso> {
+// Conferência de piso com o MAPA DE REGIÃO (espelha regras.validar_piso_por_regiao). Autoridade: 1) ajuste manual por
+// cidade; 2) mapa (CEP e bairro somam, cidade por último). Veredito: fora da área (regra com suporte) > pouco histórico >
+// entregador sem histórico (nome ausente do histórico que gerou o mapa: pode ser entregador novo).
+function validarPisoPorRegiao(pend: Dados[], mapa: MapaRegiao, ignoradas: string[], ov?: Overrides): Map<string, ErroPiso> {
   const ign = new Set(ignoradas); const out = new Map<string, ErroPiso>();
+  const manual = (ov && ov.por_cidade) || {};
+  const idx = indexarMapa(mapa);
   for (const r of pend) {
     const c = txt(r[CIDADE]);
     if (c !== null && ign.has(c)) continue;
     const awb = r[AWB] as string;
-    const [validos, escopo, temRegra] = validosRegiao(mapa, r[ZIP], r[AREA], r[CIDADE]);
-    const esperados = [...validos].sort();
-    if (!temRegra) { out.set(awb, { tipo: "Cidade fora da abrangência", detalhe: "Região (CEP/bairro/cidade) sem regra no mapeamento do estudo.", esperados: [], escopo: escopo as ErroPiso["escopo"], origem_regra: "mapa de região" }); continue; }
     const e = txt(r[ENTREG]);
-    if (!e) { out.set(awb, { tipo: "Sem entregador", detalhe: "Peça sem entregador atribuído.", esperados, escopo: escopo as ErroPiso["escopo"], origem_regra: "mapa de região" }); continue; }
-    if (!validos.has(e)) { out.set(awb, { tipo: "Entregador fora da área", detalhe: `${e} não costuma atender esta região.`, esperados, escopo: escopo as ErroPiso["escopo"], origem_regra: "mapa de região" }); }
+    if (c !== null && Object.prototype.hasOwnProperty.call(manual, c)) {
+      const v = [...new Set(manual[c])].sort();
+      if (!e) out.set(awb, { tipo: "Sem entregador", detalhe: "Peça sem entregador atribuído.", esperados: v, escopo: "cidade", origem_regra: "ajuste manual" });
+      else if (!v.includes(e)) out.set(awb, { tipo: "Entregador fora da área", detalhe: `${e} não está no ajuste manual de ${c}.`, esperados: v, escopo: "cidade", origem_regra: "ajuste manual" });
+      continue;
+    }
+    const { validos, escopo, temRegra, suporte } = resolverRegiao(idx, r[ZIP], r[AREA], r[CIDADE]);
+    const esperados = [...validos].sort();
+    const esc = escopo as ErroPiso["escopo"];
+    if (!temRegra) { out.set(awb, { tipo: "Cidade fora da abrangência", detalhe: "Região (CEP/bairro/cidade) sem regra no mapeamento do estudo.", esperados: [], escopo: esc, origem_regra: "mapa de região" }); continue; }
+    if (!e) { out.set(awb, { tipo: "Sem entregador", detalhe: "Peça sem entregador atribuído.", esperados, escopo: esc, origem_regra: "mapa de região" }); continue; }
+    if (validos.has(e)) continue;
+    if (idx.conhecidos && !idx.conhecidos.has(e))
+      out.set(awb, { tipo: ERRO_SEM_HISTORICO, detalhe: `${e} não aparece no histórico que gerou o mapa de região (entregador novo?).`, esperados, escopo: esc, origem_regra: "mapa de região" });
+    else if (suporte !== null && idx.minSuporte && suporte < idx.minSuporte)
+      out.set(awb, { tipo: ERRO_POUCO_HISTORICO, detalhe: `Região com poucas entregas no histórico (${suporte}); ${e} não está entre quem atendeu.`, esperados, escopo: esc, origem_regra: "mapa de região" });
+    else out.set(awb, { tipo: "Entregador fora da área", detalhe: `${e} não costuma atender esta região.`, esperados, escopo: esc, origem_regra: "mapa de região" });
   }
   return out;
 }
@@ -304,8 +374,8 @@ function validarPiso(pend: Dados[], rg: Regras, ignoradas: string[]): Map<string
 // OP-01: entregue = confirmado pelo relatório (status ou data de assinatura). Delivery Time = saída para entrega.
 const entregaConfirmada = (r: Dados) => STATUS_ENTREGUE.has(minus(r[STATUS]).trim()) || temValor(r[SIGN_DATE]);
 function classificar(r: Dados): Classe {
+  if (entregaConfirmada(r)) return "Entregue"; // confirmada vale mesmo com problema anterior (auditoria H-04)
   if (temValor(r[PROB])) return "Anormal";
-  if (entregaConfirmada(r)) return "Entregue";
   return "Não entregue";
 }
 function minutosEmRota(r: Dados, ref: Date): number | null {
@@ -329,6 +399,21 @@ function referenciaDoRelatorio(nome: string, linhas: Dados[] | null): [Date | nu
   }
   return [null, "relogio"];
 }
+// Evento mais recente de um relatório (espelha pipeline._ultimo_evento).
+function ultimoEvento(linhas: Dados[]): Date | null {
+  let max: number | null = null;
+  for (const r of linhas) for (const c of COLUNAS_EVENTO) { const d = paraData(r[c]); if (d && (max === null || d.getTime() > max)) max = d.getTime(); }
+  return max === null ? null : new Date(max);
+}
+// Auditoria H-02: a ordem vem das DATAS dos eventos, não do volume (espelha pipeline.indicio_ordem).
+function indicioOrdem(base: Dados[], atual: Dados[]): Analise["ordem"] {
+  const b = new Set(base.map((r) => r[AWB] as string)), a = new Set(atual.map((r) => r[AWB] as string));
+  const soAtual = [...a].filter((x) => !b.has(x)).length, soBase = [...b].filter((x) => !a.has(x)).length;
+  const eb = ultimoEvento(base), ea = ultimoEvento(atual);
+  const suspeito = eb && ea ? eb.getTime() > ea.getTime() : soAtual > soBase && a.size > b.size;
+  return { so_no_atual: soAtual, so_na_base: soBase, em_ambos: a.size - soAtual, linhas_base: b.size, linhas_atual: a.size, possivel_inversao: suspeito,
+    evento_base: eb ? dataHoraIso(eb) : null, evento_atual: ea ? dataHoraIso(ea) : null };
+}
 function backlogDias(r: Dados, ref: Date): number | null {
   const d = paraData(r[CHEGADA]); return d ? (ref.getTime() - d.getTime()) / 86400000 : null;
 }
@@ -346,25 +431,46 @@ const motivoDevolucao = (r: Dados) => MOTIVOS_DEVOLUCAO.find((p) => textoProblem
 const tresTentativas = (r: Dados) => { const c = contagem(r); return c !== null && c >= LIMITE_TENTATIVAS; };
 const ehDevolucao = (r: Dados) => tresTentativas(r) && !!motivoDevolucao(r);
 const ehRevisar = (r: Dados) => tresTentativas(r) && !motivoDevolucao(r);
+const ehAvaria = (r: Dados) => PALAVRAS_AVARIA.some((p) => textoProblema(r).includes(p));
+// Categoria de uma AWB que SAIU do relatório (espelha pipeline.classificar_saidas; auditoria C-01 e M-01). Precedência: ja_entregue > devolução > ocorrência > provável.
+type CatSaida = "provavel_entrega" | "possivel_devolucao" | "ja_entregue" | "saiu_com_ocorrencia";
+function categoriaSaida(r: Dados): CatSaida {
+  if (entregaConfirmada(r)) return "ja_entregue";
+  if (palavraDevolucao(r) || (tresTentativas(r) && !!motivoDevolucao(r))) return "possivel_devolucao";
+  if (ehExtravio(r) || ehAvaria(r)) return "saiu_com_ocorrencia";
+  return "provavel_entrega";
+}
+// Já saiu de novo para entrega depois da ocorrência (espelha metricas.reroteada).
+const reroteada = (r: Dados) => {
+  if (!temValor(r[PROB])) return false;
+  const saida = paraData(r[DELIV_TIME]), ocorrencia = paraData(r["Last Problem Date"]);
+  return !!saida && !!ocorrencia && saida.getTime() > ocorrencia.getTime();
+};
 const ehInsucesso = (r: Dados) => temValor(r[PROB]) && (contagem(r) ?? 0) < LIMITE_TENTATIVAS && !ehExtravio(r);
 
+// Progresso por entregador sobre as peças ABERTAS (espelha metricas.desempenho_progresso; auditoria C-01, decisão D1).
 function desempenhoLocal(baseF: Dados[], ultF: Dados[], dias: string[]): Desempenho {
   const b = filtrarDias(baseF, dias), u = filtrarDias(ultF, dias);
-  const cmp = comparar(b, u);
-  const ids = new Set(cmp.saiuEntregue.map((r) => r[AWB] as string));
-  const probUlt = new Map(u.map((r) => [r[AWB] as string, temValor(r[PROB])]));
+  const noUlt = new Map(u.map((r) => [r[AWB] as string, r]));
   const grupos = new Map<string, Dados[]>();
   for (const r of b) { const e = ehNulo(r[ENTREG]) ? SEM_ENTREGADOR : String(r[ENTREG]); if (!grupos.has(e)) grupos.set(e, []); grupos.get(e)!.push(r); }
   const linhas: LinhaDesempenho[] = []; const awbs: Desempenho["awbs"] = {};
   for (const [e, g] of [...grupos].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
     const cls: Record<string, string[]> = {};
-    let ent = 0, an = 0, pe = 0;
+    let ent = 0, an = 0, tr = 0, pe = 0, ja = 0;
+    const marca = (classe: string, a: string) => { (cls[classe] ||= []).push(a); };
     for (const r of g) {
       const a = r[AWB] as string;
-      if (ids.has(a)) { ent++; (cls["Entregue"] ||= []).push(a); }
-      if (probUlt.has(a)) { if (probUlt.get(a)) { an++; (cls["Anormal"] ||= []).push(a); } else { pe++; (cls["Pendente"] ||= []).push(a); } }
+      if (entregaConfirmada(r)) { ja++; continue; }
+      const nu = noUlt.get(a);
+      if (nu) {
+        if (entregaConfirmada(nu)) { ent++; marca("Entregue", a); }
+        else if (temValor(nu[PROB])) { if (reroteada(nu)) { tr++; marca("Tratada", a); } else { an++; marca("Anormal", a); } }
+        else { pe++; marca("Pendente", a); }
+      } else if (categoriaSaida(r) === "provavel_entrega") { ent++; marca("Entregue", a); }
     }
-    linhas.push({ entregador: e, total: g.length, entregue: ent, anormal: an, pendente: pe, pct_entregue: g.length ? Math.round((1000 * ent) / g.length) / 10 : 0 });
+    const total = g.length - ja;
+    linhas.push({ entregador: e, total, entregue: ent, anormal: an, tratada: tr, pendente: pe, pct_entregue: total ? Math.round((1000 * ent) / total) / 10 : 0, ja_entregues: ja });
     awbs[e] = cls;
   }
   return { dias: [...dias], linhas, awbs };
@@ -391,7 +497,7 @@ function validarTabela(t: Tabela, nome: string): ValidacaoArquivo {
   info.validas = norm.length;
   info.duplicadas = t.linhas.length - info.sem_awb - norm.length;
   if (info.sem_awb) avisos.push(`${info.sem_awb} linha(s) sem código da encomenda serão descartadas.`);
-  if (info.duplicadas) avisos.push(`${info.duplicadas} código(s) repetido(s): será mantida a última ocorrência de cada um.`);
+  if (info.duplicadas) avisos.push(`${info.duplicadas} código(s) repetido(s): será mantido o registro de evento mais recente de cada um (em empate, a última linha).`);
   const datas = norm.map((r) => paraData(r[CHEGADA])).filter((d): d is Date => !!d).map((d) => d.getTime());
   if (datas.length) { info.chegada_min = dataHoraIso(new Date(Math.min(...datas))); info.chegada_max = dataHoraIso(new Date(Math.max(...datas))); }
   info.previa = norm.slice(0, 5).map(contrato);
@@ -429,6 +535,9 @@ function qualidade(norm: Dados[]): ItemQualidade[] {
   const comCidade = (r: Dados) => temValor(r[CIDADE]);
   add("sem_cidade", "linhas sem cidade de destino", norm.filter((r) => !comCidade(r)).length, "Ficam em “Fora da jurisdição” e não entram em nenhum indicador.", [], "info");
   if (norm.length && CHEGADA in norm[0]) add("sem_chegada", "linhas sem data de chegada válida", norm.filter((r) => !paraData(r[CHEGADA])).length, "Ficam fora das faixas de tempo de espera e do filtro por dia.");
+  const colsData = norm.length ? COLUNAS_EVENTO.filter((c) => c in norm[0]) : [];
+  add("datas_invalidas", "datas em formato não reconhecido", colsData.reduce((s, c) => s + norm.filter((r) => temValor(r[c]) && !paraData(r[c])).length, 0),
+    "Ficam sem data: afetam faixas de espera, tempo em rota e a data de referência. Aceitos: aaaa-mm-dd hh:mm:ss e dd/mm/aaaa hh:mm.");
   add("sem_entregador", "linhas com cidade e sem entregador", norm.filter((r) => comCidade(r) && !temValor(r[ENTREG])).length, "Aparecem como “Sem entregador” na conferência de piso.");
   add("sem_bairro", "linhas com cidade e sem bairro", norm.filter((r) => comCidade(r) && !temValor(r[AREA])).length, "Nas cidades conferidas por bairro, são conferidas pela regra da cidade.", [], "info");
   add("entregue_confirmada", "encomendas já constam como entregues", norm.filter(entregaConfirmada).length, "Se este for o relatório atualizado, elas seguem contadas como pendentes (regra RN-003).", [], "info");
@@ -439,9 +548,16 @@ function qualidade(norm: Dados[]): ItemQualidade[] {
 function simularRegrasLocal(baseF: Dados[], ultF: Dados[], atual: ConfigRegras, novo: ConfigRegras): Simulacao {
   const erros = (c: ConfigRegras) => {
     const ov = c.overrides || { por_cidade: {}, cidades_ignoradas: [] };
-    const rg = aplicarOverrides(derivarRegras(baseF, Math.round(c.limiar_ruido || LIMIAR_RUIDO_PADRAO)), ov);
     const ign = [...new Set([...(ov.cidades_ignoradas || []), ...(c.cidades_ignoradas || [])])];
-    const m = new Map<string, string>(); for (const [k, v] of validarPiso(ultF, rg, ign)) m.set(k, v.tipo); return m;
+    const mp = c.mapa_regiao;
+    const m = new Map<string, string>();
+    // mesmo validador do resultado real: a simulação não pode prever outra coisa (auditoria H-01)
+    if (mp && (Object.keys(mp.por_cep).length || Object.keys(mp.por_bairro).length || Object.keys(mp.por_cidade).length)) {
+      for (const [k, v] of validarPisoPorRegiao(ultF, mp, ign, ov)) m.set(k, v.tipo);
+      return m;
+    }
+    const rg = aplicarOverrides(derivarRegras(baseF, Math.round(c.limiar_ruido || LIMIAR_RUIDO_PADRAO)), ov);
+    for (const [k, v] of validarPiso(ultF, rg, ign)) m.set(k, v.tipo); return m;
   };
   const antes = erros(atual), depois = erros(novo);
   const dados = new Map(ultF.map((r) => [r[AWB] as string, r]));
@@ -463,6 +579,21 @@ function contrato(r: Dados): Dados {
 // ---------- pipeline completo ----------
 interface ContextoLocal { baseF: Dados[]; ultF: Dados[] }
 
+// Filtros globais SIMÉTRICOS (espelha pipeline.filtrar_relatorios; auditoria H-03): uma peça retirada de um
+// relatório (descarregado, não recebido, FM, sem cidade) também sai do outro.
+function filtrarRelatorios(base: Dados[], ult: Dados[], ignDesc: boolean, ignNr: boolean) {
+  const b1 = filtroDescarregado(base, ignDesc), u1 = filtroDescarregado(ult, ignDesc);
+  const b1b = filtroNaoRecebido(b1, ignNr), u1b = filtroNaoRecebido(u1, ignNr);
+  const b2 = removerFm(b1b), u2 = removerFm(u1b);
+  const [bF, baseFora] = separarFora(b2), [uF, ultFora] = separarFora(u2);
+  const ids = (df: Dados[]) => new Set(df.map((r) => r[AWB] as string));
+  const idsBF = ids(bF), idsUF = ids(uF);
+  const excluir = new Set<string>([...ids(base)].filter((x) => !idsBF.has(x)).concat([...ids(ult)].filter((x) => !idsUF.has(x))));
+  const baseF = bF.filter((r) => !excluir.has(r[AWB] as string)), ultF = uF.filter((r) => !excluir.has(r[AWB] as string));
+  const cruzadasIds = [...new Set([...bF.filter((r) => excluir.has(r[AWB] as string)), ...uF.filter((r) => excluir.has(r[AWB] as string))].map((r) => r[AWB] as string))].sort();
+  return { b1, u1, b1b, u1b, b2, u2, baseF, ultF, baseFora, ultFora, cruzadasBase: bF.length - baseF.length, cruzadasAtual: uF.length - ultF.length, cruzadasIds };
+}
+
 function analisarLocal(tb: Tabela, tu: Tabela, p: ParametrosAnalise, ov: Overrides,
   just: Record<string, Justificativa>, nomes: [string, string]): { analise: Analise; ctx: ContextoLocal } {
   const base = normalizarRelatorio(tb), ult = normalizarRelatorio(tu);
@@ -471,15 +602,12 @@ function analisarLocal(tb: Tabela, tu: Tabela, p: ParametrosAnalise, ov: Overrid
   else [ref, refOrigem] = referenciaDoRelatorio(nomes[1], ult);
   if (!ref) { ref = new Date(); ref.setMilliseconds(0); refOrigem = "relogio"; }
   const refFinal: Date = ref;
-  const b1 = filtroDescarregado(base, p.ignorar_descarregado), u1 = filtroDescarregado(ult, p.ignorar_descarregado);
-  const b1b = filtroNaoRecebido(b1, p.ignorar_nao_recebido), u1b = filtroNaoRecebido(u1, p.ignorar_nao_recebido);
-  const b2 = removerFm(b1b), u2 = removerFm(u1b);
-  const [baseF, baseFora] = separarFora(b2), [ultF, ultFora] = separarFora(u2);
+  const { b1, u1, b1b, u1b, b2, u2, baseF, ultF, baseFora, ultFora, cruzadasBase, cruzadasAtual, cruzadasIds } = filtrarRelatorios(base, ult, p.ignorar_descarregado, p.ignorar_nao_recebido);
   const res = comparar(baseF, ultF);
   const limiar = Math.max(1, Math.min(20, Math.round(p.limiar_ruido || LIMIAR_RUIDO_PADRAO)));
   const rg = aplicarOverrides(derivarRegras(baseF, limiar), ov);
   const ignoradas = [...new Set([...(ov.cidades_ignoradas || []), ...(p.cidades_ignoradas || [])])];
-  const erros = p.mapa_regiao ? validarPisoPorRegiao(res.pendentes, p.mapa_regiao, ignoradas) : validarPiso(res.pendentes, rg, ignoradas);
+  const erros = p.mapa_regiao ? validarPisoPorRegiao(res.pendentes, p.mapa_regiao, ignoradas, ov) : validarPiso(res.pendentes, rg, ignoradas);
 
   const bIds = new Set(baseF.map((r) => r[AWB] as string));
   const bMap = new Map(baseF.map((r) => [r[AWB] as string, r]));
@@ -496,21 +624,21 @@ function analisarLocal(tb: Tabela, tu: Tabela, p: ParametrosAnalise, ov: Overrid
     return {
       dados: contrato(r), nova: !naBase, classe_operacional: classificar(r),
       backlog_dias: dias === null ? null : Math.round(dias * 100) / 100, faixa_backlog: faixaDe(dias),
-      em_rota_min: rota, entrega_confirmada: entregaConfirmada(r), motivo_devolucao: motivoDevolucao(r),
+      em_rota_min: rota, entrega_confirmada: entregaConfirmada(r), reroteada: reroteada(r), motivo_devolucao: motivoDevolucao(r),
       status_base: ehNulo(sb) ? null : sb ?? null, mudou_status: mudouSet.has(a),
       entregador_base: ehNulo(eb) ? null : eb ?? null, erro_piso: erros.get(a) || null, excecoes: ex,
     };
   });
-  const sairam: RegSaiu[] = [
-    ...res.saiuEntregue.map((r) => ({ dados: contrato(r), categoria: "provavel_entrega" as const, indicio: palavraDevolucao(r) })),
-    ...res.saiuDevolucao.map((r) => ({ dados: contrato(r), categoria: "possivel_devolucao" as const, indicio: palavraDevolucao(r) })),
-  ];
+  const idsUlt = new Set(ultF.map((r) => r[AWB] as string));
+  const sairam: RegSaiu[] = baseF.filter((r) => !idsUlt.has(r[AWB] as string)).map((r) => {
+    const categoria = categoriaSaida(r);
+    return { dados: contrato(r), categoria, indicio: palavraDevolucao(r) || (categoria === "possivel_devolucao" ? motivoDevolucao(r) : null) };
+  });
+  const nCat = (c: CatSaida) => sairam.filter((x) => x.categoria === c).length;
   const porCidade: Analise["regras"]["por_cidade"] = {};
   for (const c of [...rg.porCidade.keys()].sort()) porCidade[c] = { entregadores: [...rg.porCidade.get(c)!].sort(), origem: rg.origem.get(c) || "derivada", urbana: rg.urbanas.has(c) };
   const porBairro = [...rg.porBairro].map(([k, v]) => { const [cidade, bairro] = k.split("\u0000"); return { cidade, bairro, entregadores: [...v].sort() }; })
     .sort((x, y) => (x.cidade + x.bairro < y.cidade + y.bairro ? -1 : 1));
-  const bAll = ids(base), uAll = ids(ult);
-  const soAtual = [...uAll].filter((x) => !bAll.has(x)).length, soBase = [...bAll].filter((x) => !uAll.has(x)).length;
 
   const analise: Analise = {
     versao: 2, motor: "local", gerado_em: dataHoraIso(new Date()).replace(" ", "T"), referencia_backlog: dataHoraIso(refFinal),
@@ -519,13 +647,13 @@ function analisarLocal(tb: Tabela, tu: Tabela, p: ParametrosAnalise, ov: Overrid
     parametros: { ignorar_descarregado: p.ignorar_descarregado, ignorar_nao_recebido: p.ignorar_nao_recebido, limiar_ruido: limiar, min_entregadores_urbano: MIN_URBANO, limite_tentativas: LIMITE_TENTATIVAS, cidades_ignoradas: ignoradas, motivos_devolucao: [...MOTIVOS_DEVOLUCAO] },
     etapas: { base_lidas: base.length, atual_lidas: ult.length, descarregado_base: base.length - b1.length, descarregado_atual: ult.length - u1.length,
       nao_recebido_base: b1.length - b1b.length, nao_recebido_atual: u1.length - u1b.length,
-      fm_base: b1b.length - b2.length, fm_atual: u1b.length - u2.length, fora_base: baseFora.length, fora_atual: ultFora.length },
+      fm_base: b1b.length - b2.length, fm_atual: u1b.length - u2.length, fora_base: baseFora.length, fora_atual: ultFora.length,
+      cruzadas_base: cruzadasBase, cruzadas_atual: cruzadasAtual },
     removidas: { fm: [...new Set([...diff(b1b, b2), ...diff(u1b, u2)])].sort(), descarregado: [...new Set([...diff(base, b1), ...diff(ult, u1)])].sort(),
-      nao_recebido: [...new Set([...diff(b1, b1b), ...diff(u1, u1b)])].sort() },
-    resumo: { base_total: baseF.length, ultima_total: ultF.length, pendentes: res.pendentes.length, saiu_entregue: res.saiuEntregue.length,
-      saiu_devolucao: res.saiuDevolucao.length, novas: res.novas.length, mudou_status: res.mudou.length },
-    ordem: { so_no_atual: soAtual, so_na_base: soBase, em_ambos: uAll.size - soAtual, linhas_base: bAll.size, linhas_atual: uAll.size,
-      possivel_inversao: soAtual > soBase && uAll.size > bAll.size },
+      nao_recebido: [...new Set([...diff(b1, b1b), ...diff(u1, u1b)])].sort(), cruzadas: cruzadasIds },
+    resumo: { base_total: baseF.length, ultima_total: ultF.length, pendentes: res.pendentes.length, saiu_entregue: nCat("provavel_entrega"),
+      saiu_devolucao: nCat("possivel_devolucao"), novas: res.novas.length, mudou_status: res.mudou.length, saiu_ja_entregue: nCat("ja_entregue"), saiu_com_ocorrencia: nCat("saiu_com_ocorrencia") },
+    ordem: indicioOrdem(base, ult),
     atual, sairam,
     mudou_status: res.mudou.map((m) => ({ awb: m.awb, status_base: m.sb, status_atual: m.su })),
     fora: { base: baseFora.map(contrato), atual: ultFora.map(contrato) },

@@ -6,7 +6,7 @@
 //  - Local: banco do artefato (compartilhado com quem tem acesso) quando disponível;
 //    senão, apenas este navegador.
 
-type Persistencia = "servidor" | "compartilhada" | "navegador" | "memoria";
+type Persistencia = "servidor" | "compartilhada" | "navegador" | "sessao" | "memoria";
 
 interface Servico {
   modo: "python" | "local";
@@ -62,9 +62,11 @@ class ServicoApi implements Servico {
   private tabelasRegiao = new Map<string, Tabela>();
   async receber(arquivo: File) {
     const f = new FormData(); f.append("arquivo", arquivo);
+    // O servidor valida e o navegador lê uma cópia local para o Modo Estudo/Validação (cálculo client-side).
+    // As duas leituras andam EM PARALELO: antes eram uma depois da outra e os tempos se somavam.
+    const local = arquivo.arrayBuffer().then((b) => lerPlanilhaXlsx(b)).catch(() => null);
     const info = await this.req<ValidacaoArquivo>("/api/arquivos", { method: "POST", body: f });
-    // guarda uma cópia local parseada para o Modo Estudo/Validação (cálculo client-side)
-    if (info.token) { try { this.tabelasRegiao.set(info.token, await lerPlanilhaXlsx(await arquivo.arrayBuffer())); } catch { /* ignora */ } }
+    if (info.token) { const t = await local; if (t) this.tabelasRegiao.set(info.token, t); }
     return info;
   }
   exemplos() { return this.req<{ base: ValidacaoArquivo; atual: ValidacaoArquivo }>("/api/exemplos", { method: "POST" }); }
@@ -111,7 +113,7 @@ const OV_VAZIO = (): Overrides => ({ por_cidade: {}, cidades_ignoradas: [] });
 function repoMemoria(regrasBase?: Overrides | null): Repositorio {
   const mem: { j: Record<string, Justificativa>; r: Overrides | null; h: RegistroImportacao[] } = { j: {}, r: regrasBase || null, h: [] };
   return {
-    tipo: "memoria",
+    tipo: "sessao",
     async lerJust() { return mem.j; },
     async gravarJust(awb, j) { if (j) mem.j[awb] = j; else delete mem.j[awb]; },
     async lerRegras() { return mem.r || OV_VAZIO(); },
@@ -235,10 +237,7 @@ class ServicoLocal implements Servico {
     return t;
   }
   async verificarOrdem(b: ValidacaoArquivo, a: ValidacaoArquivo) {
-    const ids = (t: Tabela) => new Set(normalizarRelatorio(t).map((r) => r[AWB] as string));
-    const bi = ids(this.tabela(b)), ai = ids(this.tabela(a));
-    const soA = [...ai].filter((x) => !bi.has(x)).length, soB = [...bi].filter((x) => !ai.has(x)).length;
-    return { so_no_atual: soA, so_na_base: soB, em_ambos: ai.size - soA, linhas_base: bi.size, linhas_atual: ai.size, possivel_inversao: soA > soB && ai.size > bi.size };
+    return indicioOrdem(normalizarRelatorio(this.tabela(b)), normalizarRelatorio(this.tabela(a)));
   }
   async analisar(b: ValidacaoArquivo, a: ValidacaoArquivo, p: ParametrosAnalise) {
     const [ov, just] = await Promise.all([this.repo.lerRegras(), this.repo.lerJust()]);

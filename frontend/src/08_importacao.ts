@@ -49,6 +49,8 @@ function registroDe(a: Analise): RegistroImportacao {
     resumo: { pendentes: a.resumo.pendentes, saiu_entregue: a.resumo.saiu_entregue, saiu_devolucao: a.resumo.saiu_devolucao, novas: a.resumo.novas },
     piso: a.atual.filter((r) => r.erro_piso).length,
     excecoes: a.atual.filter((r) => r.excecoes.length && !a.justificativas[awbDe(r.dados)]).length,
+    acoes: a.atual.filter(pendPrecisaAcao).length,
+    filtros: { descarregado: a.parametros.ignorar_descarregado, nao_recebido: a.parametros.ignorar_nao_recebido },
     em_rota_24h: a.atual.filter((r) => (r.em_rota_min ?? 0) >= 1440).length,
     por_entregador: porEnt,
     pendentes: a.atual.map((r) => awbDe(r.dados)),
@@ -62,7 +64,7 @@ async function processarPisoUnico() {
   const arq = E.imp.base;
   if (!pronto(arq)) return;
   if (!E.mapaRegiaoAtivo) {
-    atualizar(() => { E.imp.erroGeral = { titulo: "Nenhum mapa de região definido", significado: "A conferência de piso de uma tabela usa o mapa de quem atende cada região (CEP). Sem ele, não há como apontar atribuições erradas.", acao: "Abra o Estudo de regiões, gere o mapa e clique em “Usar neste navegador” (ou publique o regras_regiao.json padrão)." }; });
+    atualizar(() => { E.imp.erroGeral = { titulo: "Nenhum mapa de região definido", significado: "A conferência de piso de uma tabela usa o mapa de quem atende cada região (CEP). Sem ele, não há como apontar atribuições erradas.", acao: "Abra o Estudo de regiões, gere o mapa e clique em “Gerar e usar este mapa” (ou publique o regras_regiao.json padrão)." }; });
     return;
   }
   const etapas = ["Conferindo o relatório", "Removendo força maior e separando fora da jurisdição", "Aplicando o mapa de região", "Conferindo o piso"];
@@ -191,6 +193,9 @@ function caixaReferencia(): HTMLElement {
   return h("div", { class: "conf-ref" },
     h("span", { class: "fig-tit" }, icone("relogio", "ic ic-sm"), h("strong", null, "Referência dos tempos: "), efetiva ? fmtData(efetiva) : "momento do processamento", explica("referencia", "imp")),
     h("small", null, "Origem: ", ORIGEM_REF[origem], "."),
+    (() => { const ult = paraData(v.chegada_max), ref = paraData(efetiva);
+      return ult && ref && ult.getTime() > ref.getTime()
+        ? h("small", { class: "aviso-ref", role: "alert" }, `Atenção: a última chegada (${fmtData(v.chegada_max)}) é posterior a esta referência. As encomendas que chegaram depois ficam fora das faixas de tempo.`) : null; })(),
     E.imp.editandoRef
       ? h("span", { class: "linha-campo" },
           h("label", null, h("span", { class: "sr" }, "Data e hora de referência"),
@@ -215,7 +220,7 @@ function telaImportar(): HTMLElement {
     o ? (o.possivel_inversao
       ? h("div", { class: "alerta-caixa tom-atencao", role: "alert" }, icone("alerta"),
           h("div", null, h("strong", null, "Os arquivos podem estar invertidos"),
-            h("p", null, `${fmtN(o.so_no_atual)} códigos existem só no atualizado e apenas ${fmtN(o.so_na_base)} só na base, e o atualizado tem mais linhas. Normalmente o atualizado é menor, porque as encomendas entregues saem dele.`),
+            h("p", null, o.evento_base && o.evento_atual ? `O evento mais recente do base (${fmtData(o.evento_base)}) é posterior ao do atualizado (${fmtData(o.evento_atual)}). O atualizado deveria ser o mais novo.` : `${fmtN(o.so_no_atual)} códigos existem só no atualizado e apenas ${fmtN(o.so_na_base)} só na base, e o atualizado tem mais linhas. Sem datas para comparar, este é um sinal fraco.`),
             h("p", { class: "nota" }, "Isto é um indício, não uma certeza. A ordem só muda se você trocar."),
             h("button", { type: "button", class: "btn btn-sec", on: { click: trocarOrdem } }, icone("trocar", "ic ic-sm"), "Trocar base e atualizado")))
       : h("div", { class: "alerta-caixa tom-ok" }, icone("ok"),
@@ -254,7 +259,7 @@ function telaImportar(): HTMLElement {
         ? h("div", { class: "alerta-caixa tom-ok" }, icone("ok"), h("div", null, h("strong", null, "Mapa de regiões ativo"),
             h("p", null, `A conferência usará o mapa ${E.mapaRegiaoOrigem === "sessao" ? "carregado nesta sessão (Estudo de regiões)" : "publicado como padrão"} para apontar entregas em região errada.`)))
         : h("div", { class: "alerta-caixa tom-atencao", role: "alert" }, icone("alerta"), h("div", null, h("strong", null, "Nenhum mapa de regiões definido"),
-            h("p", null, "A conferência de piso de uma tabela precisa saber quem atende cada região. Gere o mapa no Estudo de regiões e clique em “Usar neste navegador”."),
+            h("p", null, "A conferência de piso de uma tabela precisa saber quem atende cada região. Gere o mapa no Estudo de regiões e clique em “Gerar e usar este mapa”."),
             h("button", { type: "button", class: "btn btn-sec", on: { click: () => navegar("estudo") } }, icone("regras", "ic ic-sm"), "Ir para o Estudo de regiões"))),
       imp.erroGeral ? caixaProblema(imp.erroGeral) : null,
       h("div", { class: "zonas uma" }, zonaArquivo("base")),

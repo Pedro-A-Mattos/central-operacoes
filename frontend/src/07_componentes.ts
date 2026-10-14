@@ -38,9 +38,11 @@ type Tom = "critico" | "atencao" | "ok" | "neutro" | "inferido" | "info";
 function chip(texto: string, tom: Tom = "neutro", ic?: string): HTMLElement {
   return h("span", { class: "chip chip-" + tom }, ic ? icone(ic, "ic ic-xs") : null, texto);
 }
-const TOM_ERRO: Record<string, Tom> = { "Entregador fora da área": "critico", "Sem entregador": "atencao", "Cidade fora da abrangência": "critico", "Cidade ausente": "atencao" };
+const TOM_ERRO: Record<string, Tom> = { "Entregador fora da área": "critico", "Sem entregador": "atencao", "Cidade fora da abrangência": "critico", "Cidade ausente": "atencao", "Entregador sem histórico": "atencao", "Região com pouco histórico": "atencao" };
 const ROTULO_EXC: Record<TipoExcecao, string> = { devolucao: "Devolução", extravio: "Extravio", insucesso: "Insucesso", revisar_tentativas: "3+ tentativas, revisar" };
 const TOM_EXC: Record<TipoExcecao, Tom> = { devolucao: "critico", extravio: "critico", insucesso: "atencao", revisar_tentativas: "atencao" };
+// "regra do CEP", "regra do bairro"... conforme o escopo que decidiu a conferência.
+const ROTULO_ESCOPO: Record<string, string> = { cep: "do CEP", bairro: "do bairro", "cep+bairro": "do CEP e do bairro", cidade: "da cidade" };
 const TOM_FAIXA: Record<string, Tom> = { "0-1 dia": "ok", "2-3 dias": "atencao", "4+ dias": "critico" };
 const TOM_CLASSE: Record<string, Tom> = { "Entregue": "ok", "Não entregue": "neutro", "Anormal": "atencao" };
 const chipErro = (t: string) => chip(t, TOM_ERRO[t] || "neutro", TOM_ERRO[t] === "critico" ? "critico" : "alerta");
@@ -359,10 +361,22 @@ function tabela<T>(o: {
   return raiz;
 }
 
+// Copia o código da encomenda sem abrir o painel de detalhe.
+async function copiarCodigo(awb: string) {
+  try { await navigator.clipboard.writeText(awb); aviso(`Código ${awb} copiado.`); }
+  catch { aviso("Não foi possível copiar automaticamente. Selecione o código e copie manualmente.", "info"); }
+}
+
+// Código da encomenda (abre o detalhe) com o botão de copiar ao lado.
+function awbComCopia(awb: string): HTMLElement {
+  return h("span", { class: "awb-copia" },
+    h("button", { type: "button", class: "awb", "data-awb": awb, title: "Abrir detalhes da encomenda", on: { click: () => abrirAwb(awb) } }, awb),
+    h("button", { type: "button", class: "btn-copiar", title: "Copiar código", "aria-label": `Copiar código ${awb}`, on: { click: () => copiarCodigo(awb) } }, icone("copiar", "ic ic-xs")));
+}
+
 // Colunas usuais de encomenda
 function colAwb<T>(get: (r: T) => Dados): Coluna<T> {
-  return { id: "awb", rotulo: "Código (AWB)", valor: (r) => awbDe(get(r)), classe: "mono",
-    render: (r) => h("button", { type: "button", class: "awb", "data-awb": awbDe(get(r)), title: "Abrir detalhes da encomenda", on: { click: () => abrirAwb(awbDe(get(r))) } }, awbDe(get(r))) };
+  return { id: "awb", rotulo: "Código (AWB)", valor: (r) => awbDe(get(r)), classe: "mono", render: (r) => awbComCopia(awbDe(get(r))) };
 }
 function colDado<T>(col: string, get: (r: T) => Dados, rotulo?: string): Coluna<T> {
   const ehData = /Time|Date/.test(col);

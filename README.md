@@ -51,14 +51,28 @@ make instalar   # uma vez: pip install -r backend/requirements.txt && npm instal
 make test       # tudo; falha se qualquer etapa falhar
 ```
 
-`make test` roda, nesta ordem: pytest (critérios de aceite, regras revisadas e
-a API FastAPI de verdade, subindo o uvicorn), referência do motor Python,
+`make test` roda, nesta ordem: pytest (critérios de aceite, regras revisadas, regressões
+da auditoria com dados sintéticos e a API FastAPI de verdade, subindo o uvicorn), referências do
+motor Python (reais e sintéticas),
 `tsc --noEmit` em modo estrito, paridade motor local × Python (5 cenários:
 análise, validação, qualidade, referência e simulação), build, smoke do
 bundle, filtro por coluna e escrita de .xlsx (com leitura cruzada no openpyxl
 e no pandas). Os testes rodam localmente (`make test`); eles dependem de
 planilhas reais em `backend/dados_exemplo/`, que ficam fora do repositório
 público (contêm dados de clientes).
+
+## Mapa de região e calibração
+
+O mapa publicado (`frontend/public/regras_regiao.b64`) é gerado, de forma reproduzível, a partir do arquivo de estudo
+(dados de clientes: fora do Git):
+
+```bash
+python scripts/gerar_mapa_regiao.py "base de estudo.xlsx"          # regera o mapa, com proveniência e suporte
+python scripts/calibrar_criterio_regiao.py "base de estudo.xlsx"   # reproduz a calibração do critério
+```
+
+A tela de piso mostra de que arquivo e período o mapa veio. Critério e resultados: `docs/CALIBRACAO_REGIAO.md`.
+Decisões e o que mudou na auditoria de 13/10/2026: `docs/DECISOES_E_VALIDACAO.md` §9.
 
 ## Publicação (GitHub Pages)
 
@@ -94,5 +108,9 @@ push — o site republica automaticamente.
 Todo indicador e toda barra levam aos registros; todo código de encomenda
 abre o painel com "Por que esta classificação". O "?" ao lado de títulos, indicadores,
 gráficos e filtros abre a explicação completa do conceito; os textos ficam
-centralizados em `frontend/src/06b_glossario.ts`. A busca (atalho `/`) abre
+centralizados em `frontend/src/06b_glossario.ts`. Passar o mouse (ou focar com o
+teclado) sobre um rótulo com explicação (chips, legendas, abas, cabeçalhos de coluna,
+indicadores, etapas do funil) mostra um balão curto com o mesmo texto; o rótulo é
+reconhecido pelo título do verbete ou por um apelido em `frontend/src/06c_dicas.ts`,
+então um verbete novo já passa a valer em todas as telas. A busca (atalho `/`) abre
 qualquer AWB direto.

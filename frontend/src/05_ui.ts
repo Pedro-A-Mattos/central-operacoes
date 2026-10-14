@@ -98,6 +98,7 @@ const ICONES: Record<string, string> = {
   relogio: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   mapa: '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
   roteiro: '<path d="M9 5h11M9 12h11M9 19h11"/><path d="M4 5.5l1 1 2-2M4 12.5l1 1 2-2M4 19.5l1 1 2-2"/>',
+  copiar: '<rect x="8.5" y="8.5" width="11" height="11.5" rx="2"/><path d="M5 15.5V6a2 2 0 0 1 2-2h9"/>',
 };
 function icone(nome: string, cls = "ic"): HTMLElement {
   const s = document.createElement("span");

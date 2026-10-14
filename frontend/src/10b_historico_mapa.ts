@@ -41,15 +41,17 @@ function telaHistorico(): HTMLElement {
   const linhas = hist.map((r, i) => {
     const ant = i > 0 ? hist[i - 1] : null;
     const atual = new Set(r.pendentes), anterior = ant ? new Set(ant.pendentes) : null;
+    // Com filtros diferentes (ex.: "não recebido" ligado numa e não na outra) a diferença de listas não é movimento real.
+    const dif = !!(ant && r.filtros && ant.filtros && (r.filtros.descarregado !== ant.filtros.descarregado || r.filtros.nao_recebido !== ant.filtros.nao_recebido));
     return {
-      r, saiu: anterior ? [...anterior].filter((x) => !atual.has(x)).length : null,
-      entrou: anterior ? r.pendentes.filter((x) => !anterior.has(x)).length : null,
+      r, dif, saiu: anterior && !dif ? [...anterior].filter((x) => !atual.has(x)).length : null,
+      entrou: anterior && !dif ? r.pendentes.filter((x) => !anterior.has(x)).length : null,
     };
   }).reverse();
   return h("div", { class: "tela" },
     cabecalho({ area: "Monitorar", titulo: "Histórico", ajuda: "historico", pergunta: "As pendências estão caindo? O que mudou de uma importação para outra?",
       resposta: hist.length
-        ? h("p", null, h("strong", null, plural(hist.length, "importação guardada", "importações guardadas")), ` · ${E.servico?.persistencia === "servidor" ? "no servidor" : E.servico?.persistencia === "compartilhada" ? "no banco deste aplicativo" : "neste navegador"}.`,
+        ? h("p", null, h("strong", null, plural(hist.length, "importação guardada", "importações guardadas")), ` · ${E.servico?.persistencia === "servidor" ? "no servidor" : E.servico?.persistencia === "compartilhada" ? "no banco deste aplicativo" : E.servico?.persistencia === "sessao" ? "só nesta sessão: somem ao fechar ou recarregar a página" : E.servico?.persistencia === "memoria" ? "só nesta sessão (o armazenamento do navegador está bloqueado)" : "neste navegador"}.`,
             !estaNoHist ? " A análise aberta agora não está no histórico (relatórios de exemplo não são guardados)." : "")
         : undefined }),
     hist.length === 0
@@ -67,15 +69,15 @@ function telaHistorico(): HTMLElement {
               { id: "ref", rotulo: "Referência", valor: (l) => l.r.referencia, render: (l) => h("span", { class: "duas" }, fmtData(l.r.referencia), h("small", null, ORIGEM_REF[l.r.referencia_origem] || "")) },
               { id: "arq", rotulo: "Relatório atualizado", valor: (l) => l.r.arquivos.atual, classe: "mono" },
               { id: "pend", rotulo: "Pendentes", valor: (l) => l.r.resumo.pendentes, classe: "num" },
-              { id: "saiu", rotulo: "Saíram", valor: (l) => l.saiu, classe: "num", render: (l) => (l.saiu === null ? h("span", { class: "nulo" }, "—") : fmtN(l.saiu)) },
-              { id: "entrou", rotulo: "Entraram", valor: (l) => l.entrou, classe: "num", render: (l) => (l.entrou === null ? h("span", { class: "nulo" }, "—") : fmtN(l.entrou)) },
+              { id: "saiu", rotulo: "Saíram", valor: (l) => l.saiu, classe: "num", render: (l) => (l.saiu === null ? h("span", { class: "nulo", title: l.dif ? "Filtros diferentes da importação anterior: não comparável" : "" }, l.dif ? "não comparável" : "—") : fmtN(l.saiu)) },
+              { id: "entrou", rotulo: "Entraram", valor: (l) => l.entrou, classe: "num", render: (l) => (l.entrou === null ? h("span", { class: "nulo", title: l.dif ? "Filtros diferentes da importação anterior: não comparável" : "" }, l.dif ? "não comparável" : "—") : fmtN(l.entrou)) },
               { id: "piso", rotulo: "Piso", valor: (l) => l.r.piso, classe: "num" },
-              { id: "exc", rotulo: "Exceções", valor: (l) => l.r.excecoes, classe: "num" },
+              { id: "exc", rotulo: "Pend. de entrega", valor: (l) => l.r.acoes ?? null, classe: "num", render: (l) => (l.r.acoes === undefined ? h("span", { class: "nulo", title: "Importação anterior à nova regra: não registrada" }, "—") : fmtN(l.r.acoes)) },
               { id: "rota", rotulo: "Rota > 24 h", valor: (l) => l.r.em_rota_24h, classe: "num" },
             ],
             exportar: botaoExportar("historico_importacoes.xlsx", () => ({ linhas: linhas.map((l) => ({ referencia: l.r.referencia, origem_referencia: l.r.referencia_origem, arquivo_base: l.r.arquivos.base, arquivo_atualizado: l.r.arquivos.atual,
-              pendentes: l.r.resumo.pendentes, sairam: l.saiu, entraram: l.entrou, provaveis_entregas: l.r.resumo.saiu_entregue, possiveis_devolucoes: l.r.resumo.saiu_devolucao, novas: l.r.resumo.novas, piso: l.r.piso, excecoes: l.r.excecoes, em_rota_24h: l.r.em_rota_24h })),
-              colunas: ["referencia", "origem_referencia", "arquivo_base", "arquivo_atualizado", "pendentes", "sairam", "entraram", "provaveis_entregas", "possiveis_devolucoes", "novas", "piso", "excecoes", "em_rota_24h"] })) })),
+              pendentes: l.r.resumo.pendentes, sairam: l.saiu, entraram: l.entrou, provaveis_entregas: l.r.resumo.saiu_entregue, possiveis_devolucoes: l.r.resumo.saiu_devolucao, novas: l.r.resumo.novas, piso: l.r.piso, pendencias_de_entrega: l.r.acoes ?? null, em_rota_24h: l.r.em_rota_24h })),
+              colunas: ["referencia", "origem_referencia", "arquivo_base", "arquivo_atualizado", "pendentes", "sairam", "entraram", "provaveis_entregas", "possiveis_devolucoes", "novas", "piso", "pendencias_de_entrega", "em_rota_24h"] })) })),
       ]);
 }
 
@@ -88,7 +90,8 @@ function vistaNoHistorico(awb: string): { primeira: string; vezes: number } | nu
 // ---------- mapa esquemático (sem mapa de fundo) ----------
 function situacaoMapa(r: RegAtual): { chave: string; tom: string } {
   if (r.erro_piso) return { chave: "Erro de piso", tom: "critico" };
-  if (r.excecoes.some((x) => !justificada(awbDe(r.dados)) && x)) return { chave: "Exceção ativa", tom: "atencao" };
+  // ocorrência VIGENTE: problema sem saída para rota depois dele (mesma regra da Torre); a já tratada não é alerta
+  if (r.dados["Last Problem Type"] !== null && !r.reroteada && !r.entrega_confirmada && !justificada(awbDe(r.dados))) return { chave: "Ocorrência vigente", tom: "atencao" };
   return { chave: "Sem alerta", tom: "acento" };
 }
 const coordenada = (v: Valor) => (typeof v === "number" ? v : v === null ? NaN : Number(String(v).replace(",", ".")));
@@ -292,9 +295,41 @@ function telaMapa(): HTMLElement {
     if (m.cor === "rota") { const f = faixaRota(r) || "Entregue"; return { chave: f, tom: TOM_ROTA[f] || "ok" }; }
     return situacaoMapa(r);
   };
-  const ordemLeg = m.cor === "espera" ? ["0-1 dia", "2-3 dias", "4+ dias", "Sem data"] : m.cor === "rota" ? [...FAIXAS_ROTA, "Entregue"] : ["Erro de piso", "Exceção ativa", "Sem alerta"];
+  const ordemLeg = m.cor === "espera" ? ["0-1 dia", "2-3 dias", "4+ dias", "Sem data"] : m.cor === "rota" ? [...FAIXAS_ROTA, "Entregue"] : ["Erro de piso", "Ocorrência vigente", "Sem alerta"];
   const contagem = new Map<string, { n: number; tom: string }>();
   for (const p of pts) { const cor = corDe(p.r); const c = contagem.get(cor.chave) || { n: 0, tom: cor.tom }; c.n++; contagem.set(cor.chave, c); }
+
+  // Peças sem coordenada não têm ponto no mapa, mas continuam pendentes e podem ter alerta (ex.: erro de piso).
+  // Entram na legenda e geram uma faixa de aviso, para o alerta não sumir junto com o ponto.
+  const semCoordPorCat = new Map<string, { n: number; tom: string }>();
+  for (const r of semCoordRegs) { const cor = corDe(r); const c = semCoordPorCat.get(cor.chave) || { n: 0, tom: cor.tom }; c.n++; semCoordPorCat.set(cor.chave, c); }
+  const semCoordAlerta = semCoordRegs.filter((r) => situacaoMapa(r).chave !== "Sem alerta");
+  const pesoAlerta = (r: RegAtual) => (r.erro_piso ? 0 : situacaoMapa(r).chave !== "Sem alerta" ? 1 : 2);
+  const semCoordOrd = [...semCoordRegs].sort((x, y) => pesoAlerta(x) - pesoAlerta(y)); // alertas primeiro
+  const semCoordBloco: HTMLElement | null = semCoord ? (() => {
+    const det = h("details", { class: "sem-coord", id: "mp-semcoord" }) as HTMLDetailsElement;
+    det.open = m.semCoordAberto ?? semCoordAlerta.length > 0; // abre sozinho quando há alerta entre elas
+    det.append(
+      h("summary", { on: { click: () => { m.semCoordAberto = !det.open; } } },
+        `${plural(semCoord, "encomenda sem coordenada", "encomendas sem coordenada")} neste recorte${semCoordAlerta.length ? ` (${fmtN(semCoordAlerta.length)} com alerta)` : ""} (não aparecem no mapa)`),
+      tabela({ id: "mp-semcoord", titulo: "Sem coordenada no relatório", linhas: semCoordOrd, chave: (r) => awbDe(r.dados), porPagina: 20, onAbrir: (r) => abrirAwb(awbDe(r.dados)),
+          colunas: [
+            { id: "awb", rotulo: "Waybill No", valor: (r) => awbDe(r.dados), classe: "mono", render: (r) => awbComCopia(awbDe(r.dados)) },
+            { id: "ent", rotulo: "Entregador", valor: (r) => entregadorDe(r.dados) },
+            { id: "local", rotulo: "Cidade · bairro", valor: (r) => `${r.dados["Consignee City"] ?? ""} ${r.dados["Consignee Area"] ?? ""}` },
+            { id: "cep", rotulo: "CEP", valor: (r) => String(r.dados["Consignee Zip Code"] ?? ""), classe: "mono" },
+            { id: "status", rotulo: "Status", valor: (r) => String(r.dados["Last Scan Status"] ?? "") },
+            { id: "sit", rotulo: "Situação", valor: (r) => situacaoMapa(r).chave, render: (r) => (situacaoMapa(r).chave === "Sem alerta" ? h("span", { class: "nulo" }, "—") : chip(situacaoMapa(r).chave, situacaoMapa(r).tom as Tom)) },
+            { id: "piso", rotulo: "Piso", valor: (r) => (r.erro_piso ? r.erro_piso.tipo : ""), render: (r) => r.erro_piso ? h("span", { class: "duas" }, chipErro(r.erro_piso.tipo), h("small", null, r.erro_piso.esperados.length ? "deveria: " + r.erro_piso.esperados.join(" ou ") : "")) : h("span", { class: "nulo" }, "—") },
+          ],
+          exportar: botaoExportar("mapa_sem_coordenada.xlsx", () => ({ linhas: semCoordRegs.map((r) => ({ ...r.dados, erro_piso: r.erro_piso ? r.erro_piso.tipo : "", entregadores_esperados: r.erro_piso ? r.erro_piso.esperados.join(", ") : "" })), colunas: [...COLUNAS_CONTRATO, "erro_piso", "entregadores_esperados"] })) }));
+    return det;
+  })() : null;
+  const resumoAlertas = contar(semCoordAlerta, (r) => (r.erro_piso ? r.erro_piso.tipo : "Ocorrência vigente")).map((x) => `${x.rotulo}: ${x.valor}`).join(" · ");
+  const avisoSemCoord = semCoordAlerta.length ? h("div", { class: "alerta-caixa tom-atencao", role: "alert", id: "mp-aviso-semcoord" }, icone("alerta"),
+    h("div", null, h("strong", null, `${plural(semCoordAlerta.length, "encomenda com alerta não aparece", "encomendas com alerta não aparecem")} no mapa`),
+      h("p", null, `O relatório não traz latitude e longitude delas (vieram zeradas). ${resumoAlertas}. O alerta vale do mesmo jeito: veja a lista abaixo do mapa ou a Conferência de piso.`),
+      h("button", { type: "button", class: "btn btn-sec", on: { click: () => { m.semCoordAberto = true; renderizar(); setTimeout(() => document.getElementById("mp-semcoord")?.scrollIntoView({ block: "center" })); } } }, "Ver a lista"))) : null;
 
   let mapa: Filho;
   let foraDoQuadro = 0;
@@ -313,37 +348,29 @@ function telaMapa(): HTMLElement {
     cabecalho({ area: "Monitorar", titulo: "Mapa", ajuda: "mapa", pergunta: "Onde estão as pendências e onde se concentram os problemas?",
       resposta: h("p", null, h("strong", null, plural(pts.length - foraDoQuadro, "encomenda no mapa", "encomendas no mapa")),
         m.entregador ? ` de ${m.entregador}` : "", m.cidade ? ` em ${m.cidade}` : "",
-        semCoord ? ` · ${fmtN(semCoord)} sem coordenadas no relatório` : "", foraDoQuadro ? ` · ${fmtN(foraDoQuadro)} com coordenadas muito distantes das demais (provável erro de endereço)` : "", ".") }),
+        semCoord ? ` · ${fmtN(semCoord)} sem coordenadas no relatório${semCoordAlerta.length ? ` (${fmtN(semCoordAlerta.length)} com alerta)` : ""}` : "", foraDoQuadro ? ` · ${fmtN(foraDoQuadro)} com coordenadas muito distantes das demais (provável erro de endereço)` : "", ".") }),
     h("section", { class: "filtros" }, h("div", { class: "filtros-controles" },
       h("label", { class: "sel-ordem" }, h("span", null, "Cidade"), h("select", { id: "mp-cid", on: { change: (e: Event) => atualizar(() => { m.cidade = (e.target as HTMLSelectElement).value; }) } },
         h("option", { value: "" }, "Todas"), cidades.map((c) => h("option", { value: c, selected: m.cidade === c }, c)))),
       h("label", { class: "sel-ordem" }, h("span", null, "Entregador"), h("select", { id: "mp-ent", on: { change: (e: Event) => atualizar(() => { m.entregador = (e.target as HTMLSelectElement).value; }) } },
         h("option", { value: "" }, "Todos"), entregadores.map((c) => h("option", { value: c, selected: m.entregador === c }, c)))),
       h("label", { class: "sel-ordem" }, h("span", null, "Colorir por"), h("select", { id: "mp-cor", on: { change: (e: Event) => atualizar(() => { m.cor = (e.target as HTMLSelectElement).value as typeof m.cor; }) } },
-        h("option", { value: "situacao", selected: m.cor === "situacao" }, "Situação (piso e exceções)"),
+        h("option", { value: "situacao", selected: m.cor === "situacao" }, "Situação (piso e ocorrências)"),
         h("option", { value: "espera", selected: m.cor === "espera" }, "Há quanto tempo aguardam"),
         h("option", { value: "rota", selected: m.cor === "rota" }, "Tempo em rota"))))),
+    avisoSemCoord,
     h("figure", { class: "grafico" },
       h("figcaption", null, h("span", { class: "fig-tit" }, h("strong", null, m.cidade ? "Pendências em " + m.cidade : "Pendências por localização"), explica("mapa", "fig")),
         h("span", null, usarReal ? "Cada ponto é uma encomenda pendente. Passe o mouse para ver os detalhes e clique para abrir. Arraste para mover e use a roda ou os botões + / − para aproximar." : "Cada ponto é uma encomenda pendente. Clique para ver os detalhes. Escolha uma cidade para aproximar.")),
-      h("ul", { class: "legenda mapa-leg" }, ordemLeg.filter((k) => contagem.has(k)).map((k) => h("li", null, h("i", { class: "tom-" + contagem.get(k)!.tom }), `${k}: ${fmtN(contagem.get(k)!.n)}`))),
+      h("ul", { class: "legenda mapa-leg" }, ordemLeg.filter((k) => contagem.has(k) || semCoordPorCat.has(k)).map((k) => h("li", null,
+        h("i", { class: "tom-" + (contagem.get(k) || semCoordPorCat.get(k)!).tom }), `${k}: ${fmtN(contagem.get(k)?.n ?? 0)}`,
+        semCoordPorCat.has(k) ? h("small", { class: "mapa-leg-sem" }, ` + ${fmtN(semCoordPorCat.get(k)!.n)} sem coordenada`) : null))),
       mapa,
       h("p", { class: "nota" }, usarReal
         ? "Mapa de fundo do OpenStreetMap; as posições vêm das coordenadas do relatório. Para navegar pelo teclado, use a lista em "
         : "Sem internet para o mapa de fundo: mostrando as posições de forma esquemática. Para navegar pelo teclado, use a lista em ",
         h("button", { type: "button", class: "link", on: { click: () => navegar("pendencias", { de: "mapa", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, cidades: m.cidade ? [m.cidade] : [] }; } }) } }, "Pendências"), "."),
-      semCoord ? h("details", { class: "sem-coord" },
-        h("summary", null, `${plural(semCoord, "encomenda sem coordenada", "encomendas sem coordenada")} neste recorte (não aparecem no mapa)`),
-        tabela({ id: "mp-semcoord", titulo: "Sem coordenada no relatório", linhas: semCoordRegs, chave: (r) => awbDe(r.dados), porPagina: 20, onAbrir: (r) => abrirAwb(awbDe(r.dados)),
-          colunas: [
-            { id: "awb", rotulo: "Waybill No", valor: (r) => awbDe(r.dados), classe: "mono" },
-            { id: "ent", rotulo: "Entregador", valor: (r) => entregadorDe(r.dados) },
-            { id: "local", rotulo: "Cidade · bairro", valor: (r) => `${r.dados["Consignee City"] ?? ""} ${r.dados["Consignee Area"] ?? ""}` },
-            { id: "cep", rotulo: "CEP", valor: (r) => String(r.dados["Consignee Zip Code"] ?? ""), classe: "mono" },
-            { id: "status", rotulo: "Status", valor: (r) => String(r.dados["Last Scan Status"] ?? "") },
-            { id: "piso", rotulo: "Piso", valor: (r) => (r.erro_piso ? r.erro_piso.tipo : ""), render: (r) => r.erro_piso ? h("span", { class: "duas" }, chipErro(r.erro_piso.tipo), h("small", null, r.erro_piso.esperados.length ? "deveria: " + r.erro_piso.esperados.join(" ou ") : "")) : h("span", { class: "nulo" }, "—") },
-          ],
-          exportar: botaoExportar("mapa_sem_coordenada.xlsx", () => ({ linhas: semCoordRegs.map((r) => ({ ...r.dados, erro_piso: r.erro_piso ? r.erro_piso.tipo : "", entregadores_esperados: r.erro_piso ? r.erro_piso.esperados.join(", ") : "" })), colunas: [...COLUNAS_CONTRATO, "erro_piso", "entregadores_esperados"] })) })) : null));
+      semCoordBloco));
 }
 
 // ---------- mapa esquemático (SVG, sem internet) — fallback do mapa real ----------

@@ -22,20 +22,30 @@ const GLOSSARIO: Record<string, Explicacao> = {
     selo: "relatorio",
   },
   provavel_entrega: {
-    titulo: "Provável entrega",
-    oQue: "Encomenda que estava no relatório base e sumiu do atualizado, sem nenhum sinal de devolução. Provavelmente foi entregue, mas os arquivos não confirmam.",
-    calculo: "Código presente no base e ausente no atualizado, e o tipo e o motivo do último problema não contêm “devol”, “não recebido”, “nao recebido”, “recusad” nem “retorno”.",
-    exemplo: "Ontem a encomenda estava “Em rota de entrega”, sem problema. Hoje ela não aparece mais no relatório: conta como provável entrega.",
-    acao: "Use como estimativa. Para confirmar uma entrega específica, consulte o sistema da transportadora.",
+    titulo: "Prováveis entregas",
+    oQue: "Peças que estavam ABERTAS no relatório base e não aparecem no atualizado, sem sinal de devolução, extravio ou avaria. É um palpite: o relatório não confirma a entrega.",
+    calculo: "A AWB está na base (não entregue) e não está no atualizado, e o último problema não indica devolução, extravio ou avaria. Peças que já constavam entregues na base ficam em “Já entregues antes”.",
+    aviso: "Se a peça foi retirada por filtro (FM, descarregado, não recebido, sem cidade) em qualquer dos relatórios, ela sai dos dois e não vira entrega.",
     selo: "inferido",
   },
   possivel_devolucao: {
-    titulo: "Possível devolução",
-    oQue: "Encomenda que sumiu do relatório atualizado, mas cujo último problema registrado sugere devolução.",
-    calculo: "Código presente no base e ausente no atualizado, e o tipo ou o motivo do problema contém “devol”, “não recebido”, “nao recebido”, “recusad” ou “retorno”.",
-    exemplo: "No base, o problema era “Não recebido”. No atualizado, a encomenda não aparece: conta como possível devolução.",
-    acao: "Confirme com a transportadora se a encomenda voltou. Sumir do relatório nunca é tratado como extravio.",
+    titulo: "Possíveis devoluções",
+    oQue: "Peças que saíram do relatório e têm sinal de devolução: palavra de devolução no problema, ou 3 ou mais tentativas com último motivo de ausência ou recusa.",
+    calculo: "Palavras: devol, não recebido, recusad, retorno. Ou: tentativas maior ou igual a 3 e último motivo na lista de ausência ou recusa.",
+    aviso: "É um indício, não uma confirmação.",
     selo: "inferido",
+  },
+  ja_entregue: {
+    titulo: "Já entregues antes",
+    oQue: "Peças que já constavam como entregues (status ou assinatura) no relatório base e saíram do relatório. É a limpeza normal do relatório, não progresso entre os dois arquivos.",
+    calculo: "O registro da base tem status de entregue ou data de assinatura.",
+    acao: "Nada a fazer. Elas ficam fora do universo do desempenho por entregador.",
+  },
+  saiu_com_ocorrencia: {
+    titulo: "Saíram com ocorrência",
+    oQue: "Peças que saíram do relatório com extravio ou avaria no último problema. Sumir do relatório não prova que foram entregues.",
+    calculo: "O problema ou o motivo contém “lost”, “extravi”, “avaria” ou “danific”, e a peça não estava entregue na base.",
+    acao: "Investigue com a transportadora antes de considerar entregue.",
   },
   novas: {
     titulo: "Novas",
@@ -50,10 +60,11 @@ const GLOSSARIO: Record<string, Explicacao> = {
     exemplo: "No base estava “atribuído”; no atualizado, “Em rota de entrega”.",
   },
   com_ocorrencia: {
-    titulo: "Com ocorrência",
-    oQue: "Pendente que tem algum problema registrado pela transportadora.",
-    calculo: "O campo “Tipo de problema” (Last Problem Type) está preenchido.",
-    exemplo: "Reprogramação, Não entregue, Não recebido, Lost package.",
+    titulo: "Ocorrência vigente",
+    oQue: "Pendente que tem problema registrado pela transportadora e que ainda não saiu de novo para entrega depois dele.",
+    calculo: "Tipo de problema (Last Problem Type) preenchido e Delivery Time não posterior a Last Problem Date. As que já saíram para rota depois do problema aparecem como “já em rota” e não contam aqui.",
+    exemplo: "Reprogramação, Não entregue, Lost package.",
+    aviso: "O último problema fica no relatório mesmo depois de a peça voltar para a rua; por isso contar tudo que tem problema superestima o que pede ação.",
   },
   base_total: {
     titulo: "Relatório base",
@@ -63,8 +74,8 @@ const GLOSSARIO: Record<string, Explicacao> = {
   ordem_arquivos: {
     titulo: "Ordem dos arquivos",
     oQue: "Qual relatório é o base (anterior) e qual é o atualizado (mais recente). A ordem muda todos os resultados.",
-    calculo: "O sistema compara os códigos dos dois arquivos. Se há mais códigos só no atualizado do que só no base, e o atualizado tem mais linhas, ele avisa que podem estar invertidos.",
-    exemplo: "Normalmente o atualizado é menor, porque as encomendas entregues saem dele.",
+    calculo: "O sistema compara o evento mais recente de cada arquivo (chegada, problema, saída para entrega ou assinatura). Se o evento mais recente do base é posterior ao do atualizado, ele avisa que podem estar invertidos. O número de linhas não entra: o atualizado pode ter mais ou menos linhas que o base.",
+    exemplo: "Base com último evento em 12/10 às 10h e atualizado com último evento em 11/10 às 18h: provavelmente estão trocados.",
     acao: "É só um indício. A ordem só muda se você trocar.",
   },
 
@@ -78,10 +89,23 @@ const GLOSSARIO: Record<string, Explicacao> = {
   },
   erro_fora_area: {
     titulo: "Entregador fora da área",
-    oQue: "O entregador atribuído não está entre os que costumam atender aquela cidade (ou aquele bairro, nas cidades conferidas por bairro).",
+    oQue: "O entregador atribuído é conhecido no histórico, mas não está entre os que atenderam aquela região (CEP e bairro) ou cidade, e a região tem entregas suficientes para a regra ser confiável.",
     calculo: "O entregador não pertence ao conjunto válido da regra de abrangência.",
     exemplo: "Num bairro onde só os entregadores A e B costumam entregar, a encomenda está com C: erro.",
     acao: "Verifique se é erro de atribuição. Se o entregador realmente atende ali, ajuste a regra da cidade.",
+  },
+  erro_sem_historico: {
+    titulo: "Entregador sem histórico",
+    oQue: "O entregador atribuído não aparece no histórico que gerou o mapa de região. Pode ser um entregador novo; não é erro confirmado.",
+    calculo: "O nome não consta na lista de entregadores do mapa (gerada do arquivo de estudo).",
+    exemplo: "Um entregador que começou depois do período do estudo: todas as peças dele cairiam aqui, e não como “fora da área”.",
+    acao: "Confirme com o líder do piso se é entregador novo ou cobertura. Se for, gere um mapa novo incluindo o período recente.",
+  },
+  erro_pouco_historico: {
+    titulo: "Região com pouco histórico",
+    oQue: "A região (CEP ou bairro) teve poucas entregas no histórico, então a regra dela é fraca: não dá para dizer com segurança que o entregador está errado.",
+    calculo: "O total de entregas da região no histórico é menor que o mínimo do mapa (padrão: 20) e o entregador não está entre os que atenderam.",
+    acao: "Revise caso a caso. Não trate como erro confirmado.",
   },
   erro_sem_entregador: {
     titulo: "Sem entregador",
@@ -127,10 +151,44 @@ const GLOSSARIO: Record<string, Explicacao> = {
 
   // ---------- exceções ----------
   excecoes: {
-    titulo: "Exceções",
-    oQue: "Encomendas pendentes que saíram do fluxo normal de entrega e precisam de uma decisão.",
-    calculo: "Regras sobre as pendentes: devolução (3+ tentativas por ausência ou recusa), 3+ tentativas por outro motivo (revisar), extravio (palavra no problema) e insucesso (problema com menos de 3 tentativas, sem ser extravio). Uma encomenda pode cair em mais de uma.",
-    acao: "Trate cada alerta ou justifique para tirá-lo da lista ativa sem perder o registro.",
+    titulo: "Pendências de entrega",
+    oQue: "As encomendas que dependem de uma ação do coordenador para a entrega acontecer: colocar em rota de novo, cobrar o entregador ou iniciar a devolução.",
+    calculo: "Cada aba é uma regra sobre as pendentes: 2+ dias pendentes; 1, 2 e 3 tentativas com ocorrência; extravios. Quem já saiu de novo para entrega depois da ocorrência não aparece nas listas de ação: vai para “Já em rota”.",
+    acao: "Trate cada encomenda ou justifique para tirá-la da lista ativa sem perder o registro.",
+  },
+  atrasadas: {
+    titulo: "2+ dias pendentes",
+    oQue: "Encomenda que continua pendente dois dias ou mais depois de chegar ao galpão.",
+    calculo: "Dias entre a chegada ao galpão (Arrival Time) e a referência do relatório. Conta quem segue na rua e quem ainda não saiu. Fica de fora quem já tem entrega confirmada.",
+    aviso: "Encomendas sem data de chegada não entram, porque não dá para medir a espera.",
+    acao: "Cobre o entregador pela entrega ou reprograme a rota.",
+  },
+  tent1: {
+    titulo: "1 tentativa",
+    oQue: "Encomenda com uma tentativa de entrega que deu problema e que ainda não saiu para rota de novo.",
+    calculo: "Tem problema registrado, até 1 tentativa (Delivery Count), não é extravio, e a saída para entrega (Delivery Time) NÃO é posterior à data do problema (Last Problem Date).",
+    exemplo: "“Não entregue — Telefone não atendido” em 10/10 às 11h, sem nenhuma saída para entrega depois disso.",
+    aviso: "A saída para entrega é o sinal de que a peça foi colocada em rota de novo. Se o relatório não atualizar essa data, a peça continua aparecendo aqui mesmo já estando na rua.",
+    acao: "Colocar em rota de novo. O entregador precisa avisar se já está em rota.",
+  },
+  tent2: {
+    titulo: "2 tentativas",
+    oQue: "Encomenda com duas tentativas de entrega, com problema, que ainda não saiu para rota de novo.",
+    calculo: "Tem problema registrado, exatamente 2 tentativas, não é extravio, e não há saída para entrega depois da data do problema.",
+    acao: "Colocar em rota de novo e verificar com o entregador se vai devolver a peça. Ele precisa avisar se já está em rota.",
+  },
+  tent3: {
+    titulo: "3 tentativas · devolução",
+    oQue: "Encomenda que chegou a 3 ou mais tentativas e deve entrar no processo de devolução.",
+    calculo: "Tentativas (Delivery Count) maior ou igual a 3. Quando o último motivo é ausência ou recusa, a ação é “Iniciar devolução”. Quando é outro motivo (ex.: reprogramação a pedido do cliente), a ação é “Confirmar devolução”.",
+    aviso: "O relatório traz só o ÚLTIMO motivo, não o de cada tentativa. Uma reprogramação pedida pelo cliente não é ausência, por isso pede confirmação antes de devolver (decisão OP-02, 11/10).",
+    acao: "Realize o processo de devolução ou justifique, por exemplo, se o cliente pediu nova data.",
+  },
+  ja_em_rota: {
+    titulo: "Já em rota",
+    oQue: "Encomendas que tiveram ocorrência, mas que já saíram de novo para entrega. Não pedem mais ação do coordenador.",
+    calculo: "A saída para entrega (Delivery Time) é posterior à data do último problema (Last Problem Date).",
+    acao: "Use para conferir se o sistema entendeu certo e, se quiser, confirme com o entregador.",
   },
   devolucao: {
     titulo: "Devolução",
@@ -171,13 +229,13 @@ const GLOSSARIO: Record<string, Explicacao> = {
   classe_operacional: {
     titulo: "Classe operacional",
     oQue: "Situação da pendente segundo o próprio relatório, sem comparar arquivos.",
-    calculo: "Anormal: tem problema registrado. Entregue: status entregue, assinado, signed ou delivered, ou data de assinatura (Sign Date) preenchida. Não entregue: os demais.",
+    calculo: "Entregue: status entregue, assinado, signed ou delivered, ou data de assinatura (Sign Date) preenchida (vale mesmo com problema anterior). Anormal: tem problema registrado e não foi entregue. Não entregue: os demais.",
     aviso: "Até 11/10 a data “Delivery Time” também contava como entregue. Nos relatórios ela aparece cerca de 2 h depois da chegada em toda encomenda em rota: é a saída para entrega, não a entrega. Por isso deixou de contar (OP-01).",
   },
   anormal: {
-    titulo: "Anormal (pendente com ocorrência)",
-    oQue: "Encomenda que continua pendente e tem algum problema registrado pela transportadora.",
-    calculo: "O campo “Tipo de problema” está preenchido.",
+    titulo: "Anormal (com problema)",
+    oQue: "Encomenda pendente com problema registrado pela transportadora e sem entrega confirmada.",
+    calculo: "O campo “Tipo de problema” está preenchido e não há status de entregue nem assinatura. Quem foi entregue depois de um problema é “Entregue”.",
   },
   tempo_espera: {
     titulo: "Há quanto tempo aguardam",
@@ -205,9 +263,22 @@ const GLOSSARIO: Record<string, Explicacao> = {
   // ---------- entregadores ----------
   desempenho: {
     titulo: "Desempenho do entregador",
-    oQue: "Mostra o que aconteceu com as encomendas que estavam com cada entregador no relatório base.",
-    calculo: "Universo: encomendas dele no base. Provável entrega: saíram do relatório sem indício de devolução. Anormal: continuam no atualizado com problema. Pendente: continuam sem problema. O que sobra saiu com indício de devolução.",
-    exemplo: "Jessica tinha 203 no base: 100 prováveis entregas, 5 anormais, 97 pendentes e 1 saiu com indício de devolução.",
+    oQue: "Mostra o que aconteceu com as encomendas ABERTAS que estavam com cada entregador no relatório base (as já entregues ficam de fora).",
+    calculo: "Universo: encomendas dele no base que ainda não estavam entregues. Entrega: confirmada no atualizado (status ou assinatura) ou saiu do relatório sem sinal de devolução. Ocorrência vigente: continua com problema e sem saída para rota depois dele. Ocorrência já tratada: continua com problema, mas já saiu de novo para entrega. Pendente: continua, sem problema. O que sobra saiu com sinal de devolução, extravio ou avaria.",
+    aviso: "A % depende do tempo entre os dois relatórios: compare entregadores no mesmo par de arquivos, não entre importações de intervalos diferentes.",
+    exemplo: "Uma entregadora com 40 peças abertas no base: 10 entregas, 5 ocorrências vigentes, 3 já tratadas, 20 pendentes e 2 que saíram com sinal de devolução.",
+  },
+  entrega_progresso: {
+    titulo: "Entrega (provável ou confirmada)",
+    oQue: "Peça aberta na base que, no atualizado, já consta entregue (status ou assinatura) ou saiu do relatório sem sinal de devolução, extravio ou avaria.",
+    calculo: "Confirmada: status de entregue ou Sign Date preenchida. Provável: sumiu do relatório (o relatório não confirma a entrega).",
+    aviso: "Peças que já estavam entregues na base não entram: elas só saíram do relatório.",
+  },
+  ocorrencia_tratada: {
+    titulo: "Ocorrência já tratada",
+    oQue: "Peça que teve um problema registrado, mas cuja saída para entrega é POSTERIOR a ele: já foi colocada em rota de novo.",
+    calculo: "Delivery Time maior que Last Problem Date, com problema registrado e sem entrega confirmada.",
+    aviso: "O último problema continua aparecendo no relatório mesmo depois de a peça voltar para a rua. Este indicador separa o que ainda pede ação do que já foi tratado.",
   },
   pct_entregue: {
     titulo: "% de prováveis entregas",
@@ -215,12 +286,7 @@ const GLOSSARIO: Record<string, Explicacao> = {
     calculo: "Prováveis entregas ÷ total do entregador no base × 100, com uma casa decimal.",
     selo: "inferido",
   },
-  na_base: { titulo: "Total na base", oQue: "Encomendas atribuídas ao entregador no relatório base. É o universo do indicador." },
-  dias_entregadores: {
-    titulo: "Dia de chegada (Entregadores)",
-    oQue: "Recalcula a comparação usando só as encomendas que chegaram nos dias escolhidos.",
-    calculo: "Filtra os dois relatórios pelos dias e compara de novo. Vale só para esta tela.",
-  },
+  na_base: { titulo: "Abertas na base", oQue: "Encomendas atribuídas ao entregador no relatório base que ainda não estavam entregues. É o universo do indicador." },
 
   // ---------- consulta ----------
   fora_jurisdicao: {
@@ -284,15 +350,16 @@ const GLOSSARIO: Record<string, Explicacao> = {
     calculo: "Código do entregador na base, ainda presente no atualizado, sem tipo de problema.",
   },
   pendente_com_ocorrencia: {
-    titulo: "Pendente com ocorrência",
-    oQue: "Encomenda que estava com o entregador na base, continua no atualizado e tem algum problema registrado (antes chamada de “Anormal”).",
-    calculo: "Código do entregador na base, ainda presente no atualizado, com tipo de problema preenchido.",
+    titulo: "Ocorrência vigente",
+    oQue: "Encomenda que estava com o entregador na base, continua no atualizado com problema registrado e ainda não saiu de novo para entrega depois dele.",
+    calculo: "Peça aberta na base, presente no atualizado, com tipo de problema preenchido e Delivery Time não posterior a Last Problem Date.",
     exemplo: "Não entregue — Telefone não atendido; Reprogramação.",
+    acao: "É o que pede ação do coordenador: colocar em rota de novo, cobrar ou devolver (ver Pendências de entrega).",
   },
   ritmo: {
     titulo: "Ritmo",
     oQue: "Compara quanto do trabalho de cada entregador ainda está na rua com a média dos entregadores, no horário da referência.",
-    calculo: "Ainda na rua = (pendentes com e sem ocorrência) ÷ total na base. “Abaixo do ritmo” quando passa da média em mais de 15 pontos percentuais.",
+    calculo: "Ainda na rua = (ocorrência vigente + já tratada + pendentes sem ocorrência) ÷ abertas na base. “Abaixo do ritmo” quando passa da média em mais de 15 pontos percentuais, com pelo menos 5 peças. “(sem entregador)” não entra na média.",
     exemplo: "Às 14:42, a média é 30% ainda na rua; um entregador com 50% aparece como abaixo do ritmo.",
     acao: "Converse com o entregador ou redistribua a carga. Compare com o histórico para ver se é recorrente.",
   },
@@ -306,7 +373,7 @@ const GLOSSARIO: Record<string, Explicacao> = {
     titulo: "Mapa das pendências",
     oQue: "Posição de cada encomenda pendente pelas coordenadas do relatório (latitude e longitude do destinatário).",
     calculo: "No modo “Mapa”, os pontos ficam sobre o mapa de ruas do OpenStreetMap, com zoom e arraste (precisa de internet). No modo “Esquemático”, os pontos são projetados sem fundo e funciona sem internet; é também o modo usado automaticamente quando o mapa de fundo não carrega. Encomendas sem coordenadas não aparecem.",
-    acao: "Clique num ponto para ver a encomenda. Arraste e aproxime para enxergar as cidades. Use a cor por situação para achar concentrações de erros de piso ou exceções.",
+    acao: "Clique num ponto para ver a encomenda. Arraste e aproxime para enxergar as cidades. Use a cor por situação para achar concentrações de erros de piso ou ocorrências vigentes. Encomendas sem coordenada não têm ponto: a contagem delas aparece na legenda e, se houver alerta, numa faixa acima do mapa.",
   },
   simulacao: {
     titulo: "Impacto da mudança",
@@ -318,6 +385,125 @@ const GLOSSARIO: Record<string, Explicacao> = {
     titulo: "Roteiro de correção",
     oQue: "As correções de piso agrupadas por entregador atual, para conferir no galpão: o que tirar de cada um e para quem passar.",
     acao: "Marque cada encomenda conferida e exporte para levar ao piso. As marcações valem só nesta sessão.",
+  },
+  // ---------- rótulos curtos (chips, colunas, funil) ----------
+  situacao_erro_piso: {
+    titulo: "Erro de piso",
+    oQue: "A encomenda tem um alerta da conferência de piso: o entregador ou a cidade não bate com a regra de quem atende aquela região.",
+    calculo: "Vem da Conferência de piso. Tipos: entregador fora da área, entregador sem histórico, região com pouco histórico, sem entregador e cidade fora da abrangência.",
+    acao: "Abra a encomenda para ver quem deveria estar com ela, ou use a Conferência de piso para o roteiro de correção.",
+  },
+  situacao_sem_alerta: {
+    titulo: "Sem alerta",
+    oQue: "Nenhum erro de piso e nenhuma ocorrência vigente. Não significa que esteja entregue: a encomenda continua pendente.",
+  },
+  erro_cidade_ausente: {
+    titulo: "Cidade ausente",
+    oQue: "A encomenda não tem cidade de destino no relatório.",
+    calculo: "O campo “Consignee City” está vazio.",
+    acao: "Sem cidade, ela vai para “Fora da jurisdição” e não entra nos indicadores.",
+  },
+  sem_coordenada: {
+    titulo: "Sem coordenada",
+    oQue: "O relatório não traz latitude e longitude da encomenda (vazias ou zeradas), então ela não tem ponto no mapa.",
+    calculo: "Latitude ou longitude vazia ou igual a 0.",
+    acao: "O alerta dela vale do mesmo jeito: veja a lista abaixo do mapa ou a Conferência de piso.",
+  },
+  retiradas_cruzadas: {
+    titulo: "Retiradas pelo outro relatório",
+    oQue: "Peças que um dos relatórios traz como força maior, descarregado, não recebido ou sem cidade. Elas saem da análise nos dois relatórios; senão pareceriam entregas.",
+    calculo: "A AWB foi retirada por filtro num relatório e ainda estava no outro.",
+  },
+  col_pendente_ha: {
+    titulo: "Pendente há",
+    oQue: "Tempo desde a chegada ao galpão até a data de referência do relatório.",
+    calculo: "Data de referência menos o horário de chegada (Arrival Time).",
+  },
+  col_tentativas: {
+    titulo: "Tentativas",
+    oQue: "Número de tentativas de entrega registradas pela transportadora (Delivery Count).",
+    aviso: "Na prática o relatório só conta tentativas que deram problema: 3 tentativas são 3 tentativas frustradas.",
+  },
+  col_data_ocorrencia: {
+    titulo: "Data da ocorrência",
+    oQue: "Quando o último problema foi registrado (Last Problem Date).",
+    aviso: "O problema continua aparecendo mesmo depois de a peça voltar para a rua. Compare com “Saiu para rota”.",
+  },
+  col_saiu_rota: {
+    titulo: "Saiu para rota",
+    oQue: "Data e hora da saída para entrega (Delivery Time).",
+    calculo: "Se for posterior à data da ocorrência, a peça já foi colocada em rota de novo.",
+    aviso: "Na maioria das encomendas é cerca de 2 h depois da chegada: é a atribuição à rota.",
+  },
+  col_acao_sugerida: {
+    titulo: "Ação sugerida",
+    oQue: "O que fazer com a encomenda, conforme a aba: colocar em rota, ver devolução, iniciar ou confirmar devolução, investigar extravio.",
+  },
+  col_situacao: {
+    titulo: "Situação",
+    oQue: "Estado da encomenda neste recorte: Erro de piso, Ocorrência vigente ou Sem alerta.",
+  },
+  col_piso: {
+    titulo: "Piso",
+    oQue: "Resultado da conferência de piso para a encomenda e quem deveria estar com ela.",
+  },
+  col_deveria: {
+    titulo: "Deveria estar com",
+    oQue: "Entregadores que a regra de região aceita para aquele CEP, bairro ou cidade.",
+  },
+  col_esta_com: {
+    titulo: "Está com",
+    oQue: "Entregador atribuído à encomenda no relatório.",
+  },
+  col_ocorrencia: {
+    titulo: "Ocorrência",
+    oQue: "Último problema registrado: o tipo em cima e o motivo embaixo.",
+  },
+  tipo_reprogramacao: {
+    titulo: "Reprogramação",
+    oQue: "O cliente pediu outra data, horário ou endereço de entrega. Não é falha do entregador.",
+    acao: "Coloque a peça em rota de novo na data combinada. Com 3 tentativas, confirme a devolução antes de devolver.",
+  },
+  tipo_nao_entregue: {
+    titulo: "Não entregue (tipo de problema)",
+    oQue: "Tentativa de entrega sem sucesso, com um motivo registrado (por exemplo, telefone não atendido, ausente ou endereço errado).",
+    acao: "Veja o motivo e coloque em rota de novo; com 3 tentativas, a regra é iniciar a devolução.",
+  },
+  tipo_lost: {
+    titulo: "Lost package",
+    oQue: "A transportadora registrou a encomenda como perdida (extravio).",
+    acao: "Investigue com a transportadora antes de tratar como entrega ou devolução.",
+  },
+  tipo_avaria: {
+    titulo: "Avaria",
+    oQue: "A encomenda foi registrada como danificada.",
+    acao: "Siga o processo de avaria: sinalização do piso e aprovação, dentro do prazo da transportadora.",
+  },
+  col_awb: {
+    titulo: "Código (AWB)",
+    oQue: "Código único da encomenda (Waybill No). Clique nele para abrir os detalhes; o ícone ao lado copia o código.",
+  },
+  col_chegada: {
+    titulo: "Chegada ao galpão",
+    oQue: "Data e hora em que a encomenda chegou ao galpão (Arrival Time). É a base do “Pendente há” e das faixas de espera.",
+  },
+  col_status: {
+    titulo: "Status",
+    oQue: "Último status registrado pela transportadora no relatório (Last Scan Status), por exemplo “Em rota de entrega” ou “Entregue”.",
+  },
+  hist_saiu: {
+    titulo: "Saíram (entre importações)",
+    oQue: "Encomendas pendentes na importação anterior que não estão mais pendentes nesta.",
+    aviso: "Só é comparável quando os filtros (descarregado, não recebido) foram os mesmos nas duas importações.",
+  },
+  hist_entrou: {
+    titulo: "Entraram (entre importações)",
+    oQue: "Encomendas pendentes nesta importação que não estavam na anterior.",
+  },
+  funil_inicio: {
+    titulo: "Linhas no arquivo atualizado",
+    oQue: "Total de códigos únicos do relatório atualizado, antes de qualquer filtro. É o ponto de partida do funil.",
+    calculo: "Linhas com código de encomenda; repetidos contam uma vez (vale o registro de evento mais recente).",
   },
 };
 

@@ -16,7 +16,7 @@ vm.runInContext(codigo + "\nglobalThis.api = { lerPlanilhaXlsx, analisarLocal, v
 const { lerPlanilhaXlsx, analisarLocal, validarTabela, simularRegrasLocal, derivarRegiaoLocal, validarRegiaoLocal, normalizarRelatorio } = ctx.api;
 
 const ref = JSON.parse(readFileSync(process.argv[2], "utf8"));
-const dados = join(raiz, "..", "backend", "dados_exemplo");
+const dados = process.env.DADOS_DIR || join(raiz, "..", "backend", "dados_exemplo");
 const ler = async (n) => { const b = readFileSync(join(dados, n)); return lerPlanilhaXlsx(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); };
 
 let falhas = 0;
@@ -48,7 +48,7 @@ for (const cenario of ref.cenarios) {
   const porAwb = (arr) => Object.fromEntries(arr.map((x) => [chave(x), x]));
   const la = porAwb(L.atual), pa = porAwb(P.atual);
   igual(t + " AWBs atual", Object.keys(la).sort(), Object.keys(pa).sort());
-  for (const campo of ["nova", "classe_operacional", "faixa_backlog", "status_base", "mudou_status", "entregador_base", "excecoes", "erro_piso", "backlog_dias", "em_rota_min", "entrega_confirmada", "motivo_devolucao", "dados"]) {
+  for (const campo of ["nova", "classe_operacional", "faixa_backlog", "status_base", "mudou_status", "entregador_base", "excecoes", "erro_piso", "backlog_dias", "em_rota_min", "entrega_confirmada", "reroteada", "motivo_devolucao", "dados"]) {
     const dif = Object.keys(pa).filter((k) => JSON.stringify(la[k]?.[campo]) !== JSON.stringify(pa[k][campo]));
     igual(`${t} atual.${campo} (${dif.length} diferenças)`, dif.slice(0, 3).map((k) => la[k]?.[campo]), dif.slice(0, 3).map((k) => pa[k][campo]));
   }
@@ -66,12 +66,13 @@ for (const cenario of ref.cenarios) {
 }
 
 // Paridade do Modo Estudo/Validação por região (CEP)
+// Objetos JS reordenam chaves "inteiras" (ex.: CEP 38610001); compara com as chaves ordenadas dos dois lados.
+const canonico = (o) => (Array.isArray(o) ? o.map(canonico) : o && typeof o === "object" ? Object.fromEntries(Object.keys(o).sort().map((k) => [k, canonico(o[k])])) : o);
 if (ref.regiao) {
-  const tu = await ler("ultima_tabela.xlsx");
-  const rows = normalizarRelatorio(tu);
   for (const bloco of ref.regiao) {
-    const mapaL = derivarRegiaoLocal(rows, bloco.limiar);
-    igual(`[regiao limiar=${bloco.limiar}] mapa`, mapaL, bloco.mapa);
+    const rows = normalizarRelatorio(await ler(bloco.arquivo || "ultima_tabela.xlsx"));
+    const mapaL = derivarRegiaoLocal(rows, bloco.limiar, bloco.mapa.min_participacao, bloco.mapa.min_suporte);
+    igual(`[regiao ${bloco.arquivo || ""} limiar=${bloco.limiar}] mapa`, canonico(mapaL), canonico(bloco.mapa));
     const errL = validarRegiaoLocal(rows, mapaL);
     const porTipoL = {};
     for (const e of errL) porTipoL[e.tipo] = (porTipoL[e.tipo] || 0) + 1;

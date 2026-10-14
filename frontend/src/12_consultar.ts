@@ -31,19 +31,27 @@ function telaMudancas(): HTMLElement {
   const set = (fn: () => void) => atualizar(fn);
   const ent = a.sairam.filter((r) => r.categoria === "provavel_entrega");
   const dev = a.sairam.filter((r) => r.categoria === "possivel_devolucao");
+  const ja = a.sairam.filter((r) => r.categoria === "ja_entregue");
+  const oc = a.sairam.filter((r) => r.categoria === "saiu_com_ocorrencia");
+  const grupos = { provavel_entrega: ent, possivel_devolucao: dev, ja_entregue: ja, saiu_com_ocorrencia: oc } as const;
+  const REGRA_SAIDA: Record<keyof typeof grupos, string> = {
+    provavel_entrega: "Estavam ABERTAS no relatório base e não aparecem no atualizado, sem sinal de devolução, extravio ou avaria. É o que o relatório permite inferir, não uma confirmação de entrega.",
+    possivel_devolucao: "Saíram do relatório com palavra de devolução no problema (devol, não recebido, recusad, retorno) ou com 3 ou mais tentativas e último motivo de ausência ou recusa. É um indício.",
+    ja_entregue: "Já constavam como ENTREGUES (status ou assinatura) no relatório base e só saíram do relatório. Não contam como progresso entre os dois relatórios.",
+    saiu_com_ocorrencia: "Saíram com extravio ou avaria no último problema registrado. Sumir do relatório não prova entrega: investigue.",
+  };
+  const NOME_EXPORT: Record<keyof typeof grupos, string> = { provavel_entrega: "provaveis_entregas.xlsx", possivel_devolucao: "possiveis_devolucoes.xlsx", ja_entregue: "ja_entregues_antes.xlsx", saiu_com_ocorrencia: "sairam_com_ocorrencia.xlsx" };
   const novas = a.atual.filter((r) => r.nova);
   const gs = (r: RegSaiu) => r.dados, ga = (r: RegAtual) => r.dados;
   let conteudo: Filho;
-  if (f.aba === "provavel_entrega" || f.aba === "possivel_devolucao") {
-    const l = f.aba === "provavel_entrega" ? ent : dev;
+  if (f.aba in grupos) {
+    const l = grupos[f.aba as keyof typeof grupos];
     conteudo = [
-      h("p", { class: "regra" }, explica(f.aba, "mud"), f.aba === "provavel_entrega"
-        ? "Estavam no relatório base e não aparecem no atualizado, sem palavra de devolução no problema registrado. Não é confirmação de entrega."
-        : "Estavam no relatório base, não aparecem no atualizado e o problema registrado contém uma palavra de devolução (devol, não recebido, recusad, retorno). É um indício.", " ", selo("inferido")),
+      h("p", { class: "regra" }, explica(f.aba, "mud"), REGRA_SAIDA[f.aba as keyof typeof grupos], " ", f.aba === "ja_entregue" ? null : selo("inferido")),
       tabela({ id: "mud-" + f.aba, titulo: "Encomendas que saíram", linhas: l, chave: (r) => awbDe(r.dados), onAbrir: (r) => abrirAwb(awbDe(r.dados)),
         colunas: [colAwb(gs), colDado("Consignee City", gs), colDado("Delivery Associate", gs), colDado("Last Scan Status", gs, "Último status na base"), colDado("Last Problem Type", gs, "Problema"),
           ...(f.aba === "possivel_devolucao" ? [{ id: "ind", rotulo: "Indício encontrado", valor: (r: RegSaiu) => r.indicio, render: (r: RegSaiu) => chip("“" + r.indicio + "”", "inferido") }] : [])],
-        exportar: botaoExportar(f.aba === "provavel_entrega" ? "provaveis_entregas.xlsx" : "possiveis_devolucoes.xlsx", () => ({ linhas: l.map((r) => r.dados), colunas: COLUNAS_CONTRATO }), "Exportar Excel", "mud-" + f.aba) })];
+        exportar: botaoExportar(NOME_EXPORT[f.aba as keyof typeof grupos], () => ({ linhas: l.map((r) => r.dados), colunas: COLUNAS_CONTRATO }), "Exportar Excel", "mud-" + f.aba) })];
   } else if (f.aba === "novas") {
     conteudo = [h("p", { class: "regra" }, explica("novas", "mud"), "Aparecem no relatório atualizado, mas não existiam no base."),
       tabela({ id: "mud-novas", titulo: "Novas encomendas", linhas: novas, chave: (r) => awbDe(r.dados), onAbrir: (r) => abrirAwb(awbDe(r.dados)),
@@ -60,10 +68,12 @@ function telaMudancas(): HTMLElement {
   }
   return h("div", { class: "tela" },
     cabecalho({ area: "Consultar", titulo: "O que mudou", pergunta: "O que mudou entre o relatório base e o atualizado?",
-      resposta: h("p", null, `${plural(ent.length + dev.length, "encomenda saiu", "encomendas saíram")} do relatório, ${plural(novas.length, "é nova", "são novas")} e ${plural(a.mudou_status.length, "mudou", "mudaram")} de status.`) }),
+      resposta: h("p", null, `${plural(ent.length + dev.length + ja.length + oc.length, "encomenda saiu", "encomendas saíram")} do relatório (${fmtN(ja.length)} já estavam entregues no base), ${plural(novas.length, "é nova", "são novas")} e ${plural(a.mudou_status.length, "mudou", "mudaram")} de status.`) }),
     abas("mud", [
       { id: "provavel_entrega" as const, rotulo: "Prováveis entregas", n: ent.length },
       { id: "possivel_devolucao" as const, rotulo: "Possíveis devoluções", n: dev.length, tom: "inferido" as Tom },
+      { id: "saiu_com_ocorrencia" as const, rotulo: "Saíram com ocorrência", n: oc.length, tom: oc.length ? "atencao" as Tom : undefined },
+      { id: "ja_entregue" as const, rotulo: "Já entregues antes", n: ja.length },
       { id: "novas" as const, rotulo: "Novas", n: novas.length },
       { id: "status" as const, rotulo: "Mudanças de status", n: a.mudou_status.length },
     ], f.aba, (v) => set(() => { f.aba = v; })),
@@ -90,7 +100,7 @@ const EDIT = { cidade: "", sel: [] as string[], limiar: 0, ignoradas: null as st
 
 // Simulação: mostra o impacto na conferência de piso ANTES de salvar.
 const IMPACTO = { chave: "", carregando: false, res: null as Simulacao | null, erro: "", timer: 0 as unknown as ReturnType<typeof setTimeout> };
-const cfgAtual = (): ConfigRegras => ({ overrides: E.overrides, limiar_ruido: E.params.limiar_ruido, cidades_ignoradas: E.params.cidades_ignoradas });
+const cfgAtual = (): ConfigRegras => ({ overrides: E.overrides, limiar_ruido: E.params.limiar_ruido, cidades_ignoradas: E.params.cidades_ignoradas, mapa_regiao: E.mapaRegiaoAtivo });
 function simularImpacto(chave: string, novo: ConfigRegras) {
   clearTimeout(IMPACTO.timer);
   IMPACTO.chave = chave; IMPACTO.carregando = true; IMPACTO.erro = "";
@@ -114,7 +124,7 @@ function caixaImpacto(chave: string): HTMLElement | null {
       r.mudam_tipo ? chip(`${fmtN(r.mudam_tipo)} mudam de tipo`, "atencao") : null),
     nada ? null : h("details", { class: "impacto-det" }, h("summary", null, "Ver encomendas afetadas"),
       h("ul", null, r.mudancas.slice(0, 30).map((m) => h("li", null,
-        h("button", { type: "button", class: "awb", on: { click: () => abrirAwb(m.awb) } }, m.awb), ` ${m.cidade ?? ""} · ${m.entregador ?? "sem entregador"}: `,
+        awbComCopia(m.awb), ` ${m.cidade ?? ""} · ${m.entregador ?? "sem entregador"}: `,
         h("span", { class: "nulo" }, m.antes || "sem erro"), " → ", h("strong", null, m.depois || "sem erro")))),
       r.mudancas.length > 30 ? h("p", { class: "nota" }, `e mais ${fmtN(r.mudancas.length - 30)}.`) : null));
 }
@@ -156,9 +166,10 @@ function telaRegras(): HTMLElement {
       h("section", { class: "bloco" },
         h("h2", { class: "fig-tit" }, "Rigor da conferência", explica("rigor", "rg")),
         h("p", { class: "nota" }, "Número mínimo de encomendas de um entregador num lugar para que ele conte como válido ali. Abaixo disso, a associação é tratada como exceção do histórico (no MVP: “limiar de ruído”)."),
+        E.mapaRegiaoAtivo ? h("p", { class: "aviso-ref" }, "O mapa de região está ativo na conferência de piso: este rigor não se aplica (o critério vem de como o mapa foi gerado, no Estudo de regiões). Os ajustes manuais por cidade e as cidades ignoradas continuam valendo e têm prioridade sobre o mapa.") : null,
         h("div", { class: "linha-campo" },
-          h("label", null, h("span", null, "Mínimo de encomendas"), h("input", { type: "number", id: "rg-limiar", min: "1", max: "20", value: String(limiar), on: { input: (e: Event) => { EDIT.limiar = Math.max(1, Math.min(20, +(e.target as HTMLInputElement).value || 1)); simularImpacto("limiar", { ...cfgAtual(), limiar_ruido: EDIT.limiar }); } } })),
-          h("button", { type: "button", class: "btn btn-sec", disabled: E.imp.processando, on: { click: () => { E.params.limiar_ruido = EDIT.limiar || E.params.limiar_ruido; EDIT.limiar = 0; IMPACTO.chave = ""; processar(true); } } }, "Aplicar e recalcular")),
+          h("label", null, h("span", null, "Mínimo de encomendas"), h("input", { type: "number", id: "rg-limiar", min: "1", max: "20", disabled: !!E.mapaRegiaoAtivo, value: String(limiar), on: { input: (e: Event) => { EDIT.limiar = Math.max(1, Math.min(20, +(e.target as HTMLInputElement).value || 1)); simularImpacto("limiar", { ...cfgAtual(), limiar_ruido: EDIT.limiar }); } } })),
+          h("button", { type: "button", class: "btn btn-sec", disabled: E.imp.processando || !!E.mapaRegiaoAtivo, on: { click: () => { E.params.limiar_ruido = EDIT.limiar || E.params.limiar_ruido; EDIT.limiar = 0; IMPACTO.chave = ""; processar(true); } } }, "Aplicar e recalcular")),
         caixaImpacto("limiar"),
         h("p", { class: "nota" }, `Atual: ${a.parametros.limiar_ruido}. Padrão do MVP: 3. Cidades com ${a.parametros.min_entregadores_urbano} ou mais entregadores são conferidas por bairro (fixo no MVP).`)),
       h("section", { class: "bloco" },

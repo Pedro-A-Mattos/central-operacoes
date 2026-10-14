@@ -12,6 +12,10 @@ function filtrarPendencias(f: FiltrosPend): RegAtual[] {
     if (f.rota.length) { const fr = faixaRota(r); if (!fr || !f.rota.includes(fr)) return false; }
     if (f.dias.length) { const dt = paraData(d["Arrival Time"]); if (!dt || !f.dias.includes(diaIso(dt))) return false; }
     if (f.soProblema && d["Last Problem Type"] === null) return false;
+    if (f.ocorrencia === "vigente" && !(d["Last Problem Type"] !== null && !r.reroteada && !r.entrega_confirmada)) return false;
+    if (f.ocorrencia === "tratada" && !(r.reroteada && !r.entrega_confirmada)) return false;
+    if (f.ocorrencia === "vigente" && !(d["Last Problem Type"] !== null && !r.reroteada && !r.entrega_confirmada)) return false;
+    if (f.ocorrencia === "tratada" && !(r.reroteada && !r.entrega_confirmada)) return false;
     if (f.semEntregador && d["Delivery Associate"] !== null) return false;
     return true;
   });
@@ -48,6 +52,8 @@ function telaPendencias(): HTMLElement {
     ...f.faixas.map((c) => ({ texto: "Aguardando: " + c, remover: () => set(() => { f.faixas = f.faixas.filter((x) => x !== c); }) })),
     ...f.rota.map((c) => ({ texto: "Em rota: " + c, remover: () => set(() => { f.rota = f.rota.filter((x) => x !== c); }) })),
     ...f.dias.map((c) => ({ texto: "Chegada: " + fmtDia(c), remover: () => set(() => { f.dias = f.dias.filter((x) => x !== c); }) })),
+    ...(f.ocorrencia ? [{ texto: f.ocorrencia === "vigente" ? "Ocorrência vigente" : "Ocorrência já tratada", remover: () => set(() => { f.ocorrencia = ""; }) }] : []),
+    ...(f.ocorrencia ? [{ texto: f.ocorrencia === "vigente" ? "Ocorrência vigente" : "Ocorrência já tratada", remover: () => set(() => { f.ocorrencia = ""; }) }] : []),
     ...(f.soProblema ? [{ texto: "Somente com problema", remover: () => set(() => { f.soProblema = false; }) }] : []),
     ...(f.semEntregador ? [{ texto: "Somente sem entregador", remover: () => set(() => { f.semEntregador = false; }) }] : []),
     ...(f.sel ? [{ texto: "Seleção no gráfico · " + f.sel.rotulo, remover: () => set(() => { f.sel = null; }) }] : []),
@@ -56,13 +62,14 @@ function telaPendencias(): HTMLElement {
     set(() => { f.sel = it ? { dim, valor: it.chave ?? it.rotulo, rotulo: `${prefixo}: ${it.rotulo}` } : null; });
   const selDe = (dim: SelecaoGrafico["dim"]) => (f.sel && f.sel.dim === dim ? f.sel.valor : null);
 
-  const dias = recorte.map((r) => r.backlog_dias).filter((x): x is number => x !== null);
+  const dias = recorte.map((r) => r.backlog_dias).filter((x): x is number => x !== null && x >= 0); // chegada depois da referência não entra na média
+  const depoisRef = recorte.filter((r) => r.backlog_dias !== null && r.backlog_dias < 0).length;
   const media = dias.length ? dias.reduce((s, x) => s + x, 0) / dias.length : 0;
   const k = {
     pend: recorte.length, cidades: unicos(recorte.map((r) => r.dados["Consignee City"] as string)).length,
     ents: unicos(recorte.map((r) => r.dados["Delivery Associate"] as string)).length,
-    prob: recorte.filter((r) => r.dados["Last Problem Type"] !== null).length,
-    anorm: recorte.filter((r) => r.classe_operacional === "Anormal").length,
+    vigente: recorte.filter((r) => r.dados["Last Problem Type"] !== null && !r.reroteada && !r.entrega_confirmada).length,
+    tratada: recorte.filter((r) => r.reroteada && !r.entrega_confirmada).length,
   };
 
   const controles = [
@@ -83,20 +90,21 @@ function telaPendencias(): HTMLElement {
   return h("div", { class: "tela" },
     cabecalho({ area: "Monitorar", titulo: "Pendências", ajuda: "pendente", pergunta: "Quantas encomendas faltam entregar, onde estão e há quanto tempo esperam?",
       resposta: h("p", null, h("strong", null, plural(recorte.length, "encomenda pendente", "encomendas pendentes")), recorte.length !== a.atual.length ? ` no filtro atual (de ${fmtN(a.atual.length)})` : "", ` · tempo médio desde a chegada: ${fmtN(Math.round(media * 10) / 10)} dias, contado até ${fmtData(a.referencia_backlog)}.`) }),
+    funilTotais(a, false), // o operador compara esta tela com a planilha dele: mostra de quantas linhas do arquivo viemos
     barraFiltros(controles, ativos, () => set(() => { E.f.pendencias = filtrosVazios().pendencias; }), "Estes filtros valem só nesta tela."),
     temDados ? [
       h("div", { class: "kpis kpis-6" },
         kpi({ rotulo: "Pendentes", ajuda: "pendente", valor: k.pend, nota: "No filtro atual" }),
         kpi({ rotulo: "Cidades", valor: k.cidades, nota: "Com pendências" }),
         kpi({ rotulo: "Entregadores", valor: k.ents, nota: "Com encomendas atribuídas" }),
-        kpi({ rotulo: "Com problema", ajuda: "com_ocorrencia", valor: k.prob, tom: k.prob ? "atencao" : undefined, nota: "Tipo de problema preenchido" }),
-        kpi({ rotulo: "Tempo médio", ajuda: "tempo_medio", valor: fmtN(Math.round(media * 10) / 10) + " dias", nota: "Desde a chegada ao galpão" }),
-        kpi({ rotulo: "Anormais", ajuda: "anormal", valor: k.anorm, nota: "Classe operacional" })),
+        kpi({ rotulo: "Ocorrência vigente", ajuda: "com_ocorrencia", valor: k.vigente, tom: k.vigente ? "atencao" : undefined, nota: "Problema registrado e nenhuma saída para rota depois dele" }),
+        kpi({ rotulo: "Já em rota após ocorrência", ajuda: "ocorrencia_tratada", valor: k.tratada, nota: "A saída para entrega é posterior ao problema" }),
+        kpi({ rotulo: "Tempo médio", ajuda: "tempo_medio", valor: fmtN(Math.round(media * 10) / 10) + " dias", nota: "Desde a chegada ao galpão" })),
       h("div", { class: "graficos g2" },
         barras({ id: "p-g-cid", ajuda: "por_cidade", titulo: "Por cidade", descricao: "Clique numa barra para filtrar a lista abaixo.", unidade: ["encomenda", "encomendas"], itens: contar(recorte, (r) => r.dados["Consignee City"] as string), selecionado: selDe("cidade"), onSelecionar: selecionar("cidade", "Cidade") }),
         barras({ id: "p-g-ent", ajuda: "por_entregador", titulo: "Por entregador", descricao: "Os 15 com mais pendências.", unidade: ["encomenda", "encomendas"], itens: contar(recorte, (r) => entregadorDe(r.dados)).slice(0, 15), selecionado: selDe("entregador"), onSelecionar: selecionar("entregador", "Entregador"), max: 8 }),
         barras({ id: "p-g-fx", ajuda: "tempo_espera", titulo: "Há quanto tempo aguardam", descricao: "Faixas atuais do MVP: 0–1, 2–3 e 4 ou mais dias.", unidade: ["encomenda", "encomendas"], itens: faixas, selecionado: selDe("faixa"), onSelecionar: selecionar("faixa", "Aguardando"),
-          legenda: h("span", null, "Referência: ", fmtData(a.referencia_backlog), " (", ORIGEM_REF[a.referencia_origem], ")") }),
+          legenda: h("span", null, "Referência: ", fmtData(a.referencia_backlog), " (", ORIGEM_REF[a.referencia_origem], ")", depoisRef ? ` · ${plural(depoisRef, "encomenda chegou", "encomendas chegaram")} depois da referência e ficam fora das faixas e da média` : "") }),
         barras({ id: "p-g-rota", ajuda: "tempo_rota", titulo: "Há quanto tempo em rota", descricao: "Desde a saída para entrega, sem entrega confirmada.", unidade: ["encomenda", "encomendas"],
           itens: FAIXAS_ROTA.map((x) => ({ rotulo: x, valor: recorte.filter((r) => faixaRota(r) === x).length, tom: TOM_ROTA[x] })).filter((x) => x.valor || x.rotulo !== "Sem saída registrada"),
           selecionado: selDe("rota"), onSelecionar: selecionar("rota", "Em rota") }),
@@ -112,21 +120,24 @@ function telaPendencias(): HTMLElement {
 
 // ---------- Entregadores ----------
 const ORDENS: Record<FiltrosEnt["ordem"], [string, (a: LinhaDesempenho, b: LinhaDesempenho) => number]> = {
-  total: ["Mais encomendas na base", (a, b) => b.total - a.total],
-  pct_desc: ["Maior % de prováveis entregas", (a, b) => b.pct_entregue - a.pct_entregue || b.total - a.total],
-  pct_asc: ["Menor % de prováveis entregas", (a, b) => a.pct_entregue - b.pct_entregue || b.total - a.total],
-  anormal: ["Mais pendentes com ocorrência", (a, b) => b.anormal - a.anormal || b.total - a.total],
+  total: ["Mais encomendas abertas na base", (a, b) => b.total - a.total],
+  pct_desc: ["Maior % de entregas", (a, b) => b.pct_entregue - a.pct_entregue || b.total - a.total],
+  pct_asc: ["Menor % de entregas", (a, b) => a.pct_entregue - b.pct_entregue || b.total - a.total],
+  anormal: ["Mais ocorrências vigentes", (a, b) => b.anormal - a.anormal || b.total - a.total],
   pendente: ["Mais pendentes sem ocorrência", (a, b) => b.pendente - a.pendente || b.total - a.total],
   rua: ["Mais trabalho ainda na rua (%)", (a, b) => naRua(b) - naRua(a) || b.total - a.total],
 };
 // Ritmo: parte do trabalho do entregador que ainda está na rua, comparada à média.
-const naRua = (l: LinhaDesempenho) => (l.total ? (l.anormal + l.pendente) / l.total : 0);
+const naRua = (l: LinhaDesempenho) => (l.total ? (l.anormal + l.tratada + l.pendente) / l.total : 0);
 const LIMITE_RITMO = 0.15, MIN_RITMO = 5;
-function mediaNaRua(ls: LinhaDesempenho[]) { const t = ls.reduce((s, l) => s + l.total, 0); return t ? ls.reduce((s, l) => s + l.anormal + l.pendente, 0) / t : 0; }
-const abaixoDoRitmo = (l: LinhaDesempenho, media: number) => l.total >= MIN_RITMO && naRua(l) - media > LIMITE_RITMO;
+// "(sem entregador)" não é uma pessoa: fica fora da média e do alerta de ritmo (auditoria L-02).
+const soEntregadores = (ls: LinhaDesempenho[]) => ls.filter((l) => l.entregador !== SEM_ENTREGADOR);
+function mediaNaRua(ls: LinhaDesempenho[]) { const v = soEntregadores(ls); const t = v.reduce((s, l) => s + l.total, 0); return t ? v.reduce((s, l) => s + l.anormal + l.tratada + l.pendente, 0) / t : 0; }
+const abaixoDoRitmo = (l: LinhaDesempenho, media: number) => l.entregador !== SEM_ENTREGADOR && l.total >= MIN_RITMO && naRua(l) - media > LIMITE_RITMO;
 const CLASSES_ENT: { id: string; rotulo: string; tom: string }[] = [
-  { id: "Entregue", rotulo: "Provável entrega", tom: "ok" },
-  { id: "Anormal", rotulo: "Pendente com ocorrência", tom: "atencao" },
+  { id: "Entregue", rotulo: "Entrega (provável ou confirmada)", tom: "ok" },
+  { id: "Anormal", rotulo: "Ocorrência vigente", tom: "atencao" },
+  { id: "Tratada", rotulo: "Ocorrência já tratada (em rota de novo)", tom: "neutro" },
   { id: "Pendente", rotulo: "Pendente sem ocorrência", tom: "acento" },
 ];
 
@@ -147,18 +158,19 @@ function telaEntregadores(): HTMLElement {
   const a = E.analise!; const f = E.f.entregadores; const d = E.desempenho!;
   if (f.sel && !d.linhas.some((l) => l.entregador === f.sel!.entregador)) f.sel = null;
   const linhas = [...d.linhas].sort(ORDENS[f.ordem][1]);
-  const tot = d.linhas.reduce((s, l) => ({ total: s.total + l.total, entregue: s.entregue + l.entregue, anormal: s.anormal + l.anormal, pendente: s.pendente + l.pendente }), { total: 0, entregue: 0, anormal: 0, pendente: 0 });
+  const tot = d.linhas.reduce((s, l) => ({ total: s.total + l.total, entregue: s.entregue + l.entregue, anormal: s.anormal + l.anormal, tratada: s.tratada + l.tratada, pendente: s.pendente + l.pendente, ja: s.ja + l.ja_entregues }), { total: 0, entregue: 0, anormal: 0, tratada: 0, pendente: 0, ja: 0 });
   const set = (fn: () => void) => atualizar(fn);
   const media = mediaNaRua(d.linhas);
   const abaixo = d.linhas.filter((l) => abaixoDoRitmo(l, media));
   const horaRef = fmtData(a.referencia_backlog).slice(-5);
-  const resto = (l: { total: number; entregue: number; anormal: number; pendente: number }) => l.total - l.entregue - l.anormal - l.pendente;
+  const resto = (l: { total: number; entregue: number; anormal: number; tratada: number; pendente: number }) => l.total - l.entregue - l.anormal - l.tratada - l.pendente;
   const ORDEM_POR_CLASSE: Record<string, FiltrosEnt["ordem"]> = { Entregue: "pct_desc", Anormal: "anormal", Pendente: "pendente" };
-  const segs = (l: { total: number; entregue: number; anormal: number; pendente: number }): SegRosca[] => [
-    { id: "Entregue", rotulo: "Provável entrega", valor: l.entregue, tom: "ok", ajuda: "provavel_entrega" },
-    { id: "Anormal", rotulo: "Pendente com ocorrência", valor: l.anormal, tom: "atencao", ajuda: "pendente_com_ocorrencia" },
+  const segs = (l: { total: number; entregue: number; anormal: number; tratada: number; pendente: number }): SegRosca[] => [
+    { id: "Entregue", rotulo: "Entrega (provável ou confirmada)", valor: l.entregue, tom: "ok", ajuda: "entrega_progresso" },
+    { id: "Anormal", rotulo: "Ocorrência vigente", valor: l.anormal, tom: "atencao", ajuda: "pendente_com_ocorrencia" },
+    { id: "Tratada", rotulo: "Ocorrência já tratada", valor: l.tratada, tom: "neutro", ajuda: "ocorrencia_tratada" },
     { id: "Pendente", rotulo: "Pendente sem ocorrência", valor: l.pendente, tom: "acento", ajuda: "pendente_sem_ocorrencia" },
-    { id: "Devolucao", rotulo: "Saiu com indício de devolução", valor: resto(l), tom: "inferido", ajuda: "possivel_devolucao" },
+    { id: "Devolucao", rotulo: "Saiu com sinal de devolução ou ocorrência", valor: resto(l), tom: "inferido", ajuda: "possivel_devolucao" },
   ];
 
   const lista = h("ol", { class: "empilhadas", "aria-label": "Composição por entregador" }, linhas.map((l) => {
@@ -170,8 +182,8 @@ function telaEntregadores(): HTMLElement {
       h("button", { type: "button", class: "emp-nome", title: "Ver a composição de " + l.entregador, "aria-pressed": selE ? "true" : "false",
         on: { click: () => set(() => { f.sel = selE && !f.sel!.classe ? null : { entregador: l.entregador, classe: null }; TAB.delete("ent-awb"); }) } }, l.entregador),
       h("span", { class: "emp-barra" },
-        seg("Entregue", "Provável entrega", l.entregue, "ok"), seg("Anormal", "Pendente com ocorrência", l.anormal, "atencao"), seg("Pendente", "Pendente sem ocorrência", l.pendente, "acento"),
-        resto(l) > 0 ? h("span", { class: "seg tom-inferido" + (f.realce && f.realce !== "Devolucao" ? " apagado" : ""), style: { flexGrow: String(resto(l)) }, title: `${plural(resto(l), "encomenda saiu", "encomendas saíram")} com indício de devolução` }) : null),
+        seg("Entregue", "Entrega (provável ou confirmada)", l.entregue, "ok"), seg("Anormal", "Ocorrência vigente", l.anormal, "atencao"), seg("Tratada", "Ocorrência já tratada", l.tratada, "neutro"), seg("Pendente", "Pendente sem ocorrência", l.pendente, "acento"),
+        resto(l) > 0 ? h("span", { class: "seg tom-inferido" + (f.realce && f.realce !== "Devolucao" ? " apagado" : ""), style: { flexGrow: String(resto(l)) }, title: `${plural(resto(l), "encomenda saiu", "encomendas saíram")} com sinal de devolução ou ocorrência` }) : null),
       h("span", { class: "emp-num" }, abaixoDoRitmo(l, media) ? h("span", { class: "ritmo-mark", title: `Abaixo do ritmo: ${fmtPct(100 * naRua(l))} ainda na rua, média ${fmtPct(100 * media)}` }, "▲") : null,
         h("strong", null, fmtPct(l.pct_entregue)), h("small", null, ` de ${fmtN(l.total)}`)));
   }));
@@ -181,15 +193,15 @@ function telaEntregadores(): HTMLElement {
     const l = d.linhas.find((x) => x.entregador === f.sel!.entregador);
     if (l) {
       const cls = d.awbs[l.entregador] || {};
-      const classes = f.sel.classe ? [f.sel.classe] : ["Entregue", "Anormal", "Pendente"];
+      const classes = f.sel.classe ? [f.sel.classe] : ["Entregue", "Anormal", "Tratada", "Pendente"];
       const regs = classes.flatMap((c) => (cls[c] || []).map((awb) => ({ awb, classe: c, dados: dadosDeAwb(awb) })));
       const rot = (c: string) => CLASSES_ENT.find((x) => x.id === c)!.rotulo;
       detalhe = h("section", { class: "bloco detalhe-ent", "aria-labelledby": "de-tit" },
         h("div", { class: "bloco-cab" }, h("h2", { id: "de-tit" }, l.entregador),
           h("button", { type: "button", class: "link", on: { click: () => set(() => { f.sel = null; }) } }, "Fechar")),
         abaixoDoRitmo(l, media) ? h("p", { class: "nota ritmo-nota" }, h("span", { class: "ritmo-mark" }, "▲"), ` Abaixo do ritmo às ${horaRef}: ${fmtPct(100 * naRua(l))} do trabalho ainda na rua, contra ${fmtPct(100 * media)} na média. `, explica("ritmo", "det")) : null,
-        rosca({ id: "ent-sel", titulo: "Composição das encomendas", descricao: `${plural(l.total, "encomenda", "encomendas")} na base. Clique numa parte para listar só ela.`,
-          segmentos: segs(l), centro: { valor: fmtPct(l.pct_entregue), rotulo: "prováveis entregas" }, selecionado: f.sel.classe,
+        rosca({ id: "ent-sel", titulo: "Composição das encomendas", descricao: `${plural(l.total, "encomenda aberta", "encomendas abertas")} na base${l.ja_entregues ? ` (fora ${fmtN(l.ja_entregues)} já entregues antes)` : ""}. Clique numa parte para listar só ela.`,
+          segmentos: segs(l), centro: { valor: fmtPct(l.pct_entregue), rotulo: "de entregas" }, selecionado: f.sel.classe,
           onSelecionar: (id) => set(() => { f.sel = { entregador: l.entregador, classe: id === "Devolucao" ? f.sel!.classe : id }; TAB.delete("ent-awb"); }) }),
         tabela({ id: "ent-awb", titulo: "Encomendas do entregador", linhas: regs, chave: (r) => r.awb, onAbrir: (r) => abrirAwb(r.awb),
           colunas: [colAwb((r: { dados: Dados }) => r.dados), { id: "classe", rotulo: "Situação", valor: (r) => rot(r.classe), render: (r) => chip(rot(r.classe), r.classe === "Entregue" ? "ok" : r.classe === "Anormal" ? "atencao" : "neutro") },
@@ -200,7 +212,7 @@ function telaEntregadores(): HTMLElement {
 
   return h("div", { class: "tela" },
     cabecalho({ area: "Monitorar", titulo: "Entregadores", ajuda: "desempenho", pergunta: "Como está cada entregador: o que saiu, o que tem problema e o que segue pendente?",
-      resposta: h("p", null, h("strong", null, fmtPct(tot.total ? (100 * tot.entregue) / tot.total : 0)), ` das ${fmtN(tot.total)} encomendas da base saíram como prováveis entregas · ${fmtN(tot.anormal)} seguem pendentes com ocorrência · ${fmtN(tot.pendente)} seguem pendentes sem ocorrência.`) }),
+      resposta: h("p", null, h("strong", null, fmtPct(tot.total ? (100 * tot.entregue) / tot.total : 0)), ` das ${fmtN(tot.total)} encomendas abertas na base já saíram como entrega (provável ou confirmada) · ${fmtN(tot.anormal)} seguem com ocorrência vigente · ${fmtN(tot.tratada)} já voltaram para a rua · ${fmtN(tot.pendente)} pendentes sem ocorrência. ${fmtN(tot.ja)} já estavam entregues na base e não entram na conta.`) }),
     barraFiltros([
       multi({ id: "e-dias", ajuda: "dias_entregadores", rotulo: "Dia de chegada", opcoes: a.dias_chegada_entregadores, valores: f.dias, formatar: fmtDia, onMudar: (v) => mudarDiasEntregadores(v),
         descricao: "Recalcula a comparação só com as encomendas que chegaram nestes dias." }),
@@ -209,21 +221,21 @@ function telaEntregadores(): HTMLElement {
           Object.entries(ORDENS).map(([k, [r]]) => h("option", { value: k, selected: f.ordem === k }, r)))),
       E.carregandoDesempenho ? h("span", { class: "carregando" }, h("span", { class: "giro" }), "Recalculando…") : null,
     ], f.dias.map((x) => ({ texto: "Chegada: " + fmtDia(x), remover: () => mudarDiasEntregadores(f.dias.filter((y) => y !== x)) })), () => mudarDiasEntregadores([]),
-      "Universo de cada entregador: as encomendas atribuídas a ele no relatório base."),
+      "Universo de cada entregador: as encomendas atribuídas a ele no relatório base que AINDA NÃO estavam entregues."),
     h("div", { class: "ent-topo" },
       h("div", { class: "kpis kpis-2x" },
-        kpi({ rotulo: "Entregadores", valor: d.linhas.length, nota: "Com encomendas na base" }),
-        kpi({ rotulo: "Na base", ajuda: "na_base", valor: tot.total, nota: "Universo do indicador" }),
+        kpi({ rotulo: "Entregadores", valor: soEntregadores(d.linhas).length, nota: "Com encomendas na base" }),
+        kpi({ rotulo: "Abertas na base", ajuda: "na_base", valor: tot.total, nota: "Universo do indicador" }),
         kpi({ rotulo: "Abaixo do ritmo", ajuda: "ritmo", valor: abaixo.length, tom: abaixo.length ? "atencao" : undefined, nota: `Às ${horaRef}, média de ${fmtPct(100 * media)} ainda na rua`,
           destino: abaixo.length ? () => set(() => { f.ordem = "rua"; }) : undefined }),
-        kpi({ rotulo: "Pendentes com ocorrência", ajuda: "pendente_com_ocorrencia", valor: tot.anormal, tom: tot.anormal ? "atencao" : undefined, nota: "Seguem no atualizado com problema" })),
-      rosca({ id: "ent-geral", titulo: "Resumo de todos os entregadores", ajuda: "desempenho", descricao: "Clique numa parte para destacá-la nas barras e ordenar por ela.",
-        segmentos: segs(tot), centro: { valor: fmtPct(tot.total ? (100 * tot.entregue) / tot.total : 0), rotulo: "prováveis entregas" }, selecionado: f.realce,
+        kpi({ rotulo: "Ocorrências vigentes", ajuda: "pendente_com_ocorrencia", valor: tot.anormal, tom: tot.anormal ? "atencao" : undefined, nota: "Problema sem saída para rota depois" })),
+      rosca({ id: "ent-geral", titulo: "Resumo de todos os entregadores", ajuda: "desempenho", descricao: "Peças abertas na base. Clique numa parte para destacá-la nas barras e ordenar por ela.",
+        segmentos: segs(tot), centro: { valor: fmtPct(tot.total ? (100 * tot.entregue) / tot.total : 0), rotulo: "de entregas" }, selecionado: f.realce,
         onSelecionar: (id) => set(() => { f.realce = id; if (id && ORDEM_POR_CLASSE[id]) f.ordem = ORDEM_POR_CLASSE[id]; }) })),
     h("div", { class: "ent-layout" + (detalhe ? " com-detalhe" : "") },
       h("figure", { class: "grafico" },
-        h("figcaption", null, h("span", { class: "fig-tit" }, h("strong", null, "Composição por entregador"), explica("desempenho", "comp")), h("span", null, "Cada linha soma 100% das encomendas do entregador na base. Clique numa cor para ver as encomendas.")),
-        h("div", { class: "legenda" }, CLASSES_ENT.map((c) => h("span", null, h("i", { class: "tom-" + c.tom }), c.rotulo)), h("span", null, h("i", { class: "tom-inferido" }), "Saíram com indício de devolução")),
+        h("figcaption", null, h("span", { class: "fig-tit" }, h("strong", null, "Composição por entregador"), explica("desempenho", "comp")), h("span", null, "Cada linha soma 100% das encomendas abertas do entregador na base. Clique numa cor para ver as encomendas.")),
+        h("div", { class: "legenda" }, CLASSES_ENT.map((c) => h("span", null, h("i", { class: "tom-" + c.tom }), c.rotulo)), h("span", null, h("i", { class: "tom-inferido" }), "Saíram com sinal de devolução ou ocorrência")),
         linhas.length ? lista : vazio("Nenhum entregador neste filtro", "Não há encomendas na base para os dias escolhidos.")),
       detalhe),
     h("section", { class: "bloco", "aria-labelledby": "et-tit" },
@@ -232,12 +244,14 @@ function telaEntregadores(): HTMLElement {
         onAbrir: (l) => set(() => { f.sel = { entregador: l.entregador, classe: null }; TAB.delete("ent-awb"); }),
         colunas: [
           { id: "entregador", rotulo: "Entregador", valor: (l) => l.entregador },
-          { id: "total", rotulo: "Total na base", valor: (l) => l.total, classe: "num" },
-          { id: "entregue", rotulo: "Prováveis entregas", valor: (l) => l.entregue, classe: "num" },
-          { id: "anormal", rotulo: "Pend. c/ ocorrência", valor: (l) => l.anormal, classe: "num" },
-          { id: "pendente", rotulo: "Pend. s/ ocorrência", valor: (l) => l.pendente, classe: "num" },
-          { id: "pct", rotulo: "% prov. entregas", valor: (l) => l.pct_entregue, classe: "num", render: (l) => fmtPct(l.pct_entregue) },
+          { id: "total", rotulo: "Abertas na base", valor: (l) => l.total, classe: "num" },
+          { id: "entregue", rotulo: "Entregas", valor: (l) => l.entregue, classe: "num" },
+          { id: "anormal", rotulo: "Ocorr. vigente", valor: (l) => l.anormal, classe: "num" },
+          { id: "tratada", rotulo: "Ocorr. tratada", valor: (l) => l.tratada, classe: "num" },
+          { id: "pendente", rotulo: "Pend. s/ ocorr.", valor: (l) => l.pendente, classe: "num" },
+          { id: "pct", rotulo: "% de entregas", valor: (l) => l.pct_entregue, classe: "num", render: (l) => fmtPct(l.pct_entregue) },
+          { id: "ja", rotulo: "Já entregues antes", valor: (l) => l.ja_entregues, classe: "num" },
           { id: "rua", rotulo: "Ainda na rua", valor: (l) => Math.round(1000 * naRua(l)) / 10, classe: "num", render: (l) => h("span", { class: "tempo" }, fmtPct(100 * naRua(l)), abaixoDoRitmo(l, media) ? chip("Abaixo do ritmo", "atencao") : null) },
         ],
-        exportar: botaoExportar("desempenho_entregadores.xlsx", () => ({ linhas: linhas as unknown as Dados[], colunas: ["entregador", "total", "entregue", "anormal", "pendente", "pct_entregue"] })) })));
+        exportar: botaoExportar("desempenho_entregadores.xlsx", () => ({ linhas: linhas as unknown as Dados[], colunas: ["entregador", "total", "entregue", "anormal", "tratada", "pendente", "pct_entregue", "ja_entregues"] })) })));
 }

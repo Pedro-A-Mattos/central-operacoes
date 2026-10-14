@@ -4,7 +4,7 @@ const NAV: { grupo: string; itens: { tela: Tela; rotulo: string; icone: string; 
   { grupo: "", itens: [{ tela: "torre", rotulo: "Torre de controle", icone: "torre" }] },
   { grupo: "Agir agora", itens: [
     { tela: "piso", rotulo: "Conferência de piso", icone: "piso", badge: () => ({ n: errosPiso().length, tom: "critico" }) },
-    { tela: "excecoes", rotulo: "Exceções", icone: "alerta", badge: () => ({ n: excAtivas("devolucao").length + excAtivas("extravio").length + excAtivas("insucesso").length + excAtivas("revisar_tentativas").length, tom: "atencao" }) },
+    { tela: "excecoes", rotulo: "Pendências de entrega", icone: "alerta", badge: () => ({ n: (E.analise ? E.analise.atual.filter(pendPrecisaAcao).length : 0), tom: "atencao" }) },
   ] },
   { grupo: "Monitorar", itens: [
     { tela: "pendencias", rotulo: "Pendências", icone: "pendencias" },
@@ -30,7 +30,7 @@ function buscarAwb(bruto: string) {
   if (!q) return;
   if (E.idx.has(q)) { BUSCA.q = ""; BUSCA.aberta = false; BUSCA.msg = ""; abrirAwb(q); return; }
   const a = E.analise!;
-  BUSCA.msg = a.removidas.fm.includes(q) || a.removidas.descarregado.includes(q) || a.removidas.nao_recebido.includes(q) ? "" : `Nenhuma encomenda com o código ${q} nos dois relatórios.`;
+  BUSCA.msg = a.removidas.fm.includes(q) || a.removidas.descarregado.includes(q) || a.removidas.nao_recebido.includes(q) || (a.removidas.cruzadas || []).includes(q) ? "" : `Nenhuma encomenda com o código ${q} nos dois relatórios.`;
   if (!BUSCA.msg) { abrirAwb(q); return; }
   BUSCA.aberta = true; renderizar();
   setTimeout(() => document.getElementById("busca-awb")?.focus());
@@ -122,6 +122,7 @@ function telaAtual(): HTMLElement {
 }
 
 function render() {
+  ocultarDica(); // o elemento sob o mouse vai ser substituído
   const raiz = document.getElementById("app")!;
   const ativo = document.activeElement as HTMLElement | null;
   const idFoco = ativo && ativo.id ? ativo.id : null;
@@ -146,6 +147,7 @@ function render() {
   }
   if (Math.abs(window.scrollY - yAntes) > 2) window.scrollTo(0, yAntes);
   posicionarAjuda();
+  marcarDicas(raiz); // dicas ao passar o mouse nos rótulos que têm explicação no glossário
 }
 
 // O balão da ajuda é fixo na tela, ancorado ao botão "?" (não é cortado por tabelas com rolagem).
@@ -162,6 +164,7 @@ function posicionarAjuda() {
 
 async function iniciar() {
   renderizar = render;
+  instalarDicas();
   document.documentElement.lang = "pt-BR";
   document.addEventListener("keydown", (e) => {
     if (e.key === "/" && !(e.target as HTMLElement).closest("input,textarea,select")) { const b = document.getElementById("busca-awb"); if (b) { e.preventDefault(); b.focus(); } }

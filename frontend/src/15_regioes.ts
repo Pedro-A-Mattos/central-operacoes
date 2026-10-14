@@ -49,8 +49,8 @@ async function carregarMapaRegiaoPublicado(): Promise<MapaRegiao | null> {
   const norm = (v: unknown): MapaRegiao | null => {
     if (!v || typeof v !== "object") return null;
     const o = v as Record<string, unknown>;
-    return { limiar: Number(o.limiar) || 0, por_cep: (o.por_cep as Record<string, string[]>) || {},
-             por_bairro: (o.por_bairro as Record<string, string[]>) || {}, por_cidade: (o.por_cidade as Record<string, string[]>) || {} };
+    return { ...(o as object), limiar: Number(o.limiar) || 0, por_cep: (o.por_cep as Record<string, string[]>) || {},
+             por_bairro: (o.por_bairro as Record<string, string[]>) || {}, por_cidade: (o.por_cidade as Record<string, string[]>) || {} } as MapaRegiao;
   };
   // 1) arquivo ofuscado
   try {
@@ -73,6 +73,7 @@ async function carregarMapaRegiaoPublicado(): Promise<MapaRegiao | null> {
   } catch { return null; }
 }
 
+// Deriva o mapa com o limiar escolhido. Não ativa nada sozinha: quem ativa é `aplicarEstudo`.
 async function processarEstudo() {
   const e = E.estudo;
   if (!pronto(e.arquivo)) return;
@@ -92,19 +93,32 @@ async function baixarMapaRegiao() {
   else if (r === "erro") aviso("Não foi possível gerar o arquivo neste ambiente.", "erro");
 }
 
-// Usa o mapa derivado como regra ativa da conferência de piso (só nesta sessão).
-// Reprocessa a análise existente com o mapa novo, sem reimportar: respeita o modo
+// Reprocessa a análise existente com o mapa ativo, sem reimportar: respeita o modo
 // (piso de 1 tabela usa a mesma planilha; análise completa reprocessa base × atual).
 async function reprocessarComMapa() {
   if (E.pisoUnico) await processarPisoUnico();
   else await processar(true);
 }
-async function usarMapaNaSessao() {
+
+// Um único passo: gera o mapa com o limiar escolhido, ATIVA nesta sessão, recalcula a conferência de piso e guarda
+// "antes → agora" para a tela mostrar. Vale só na sessão; "Voltar ao mapa publicado" desfaz.
+async function aplicarEstudo() {
   const e = E.estudo;
+  if (!pronto(e.arquivo) || e.processando) return;
+  const antes = E.analise ? errosPiso().length : null;
+  atualizar(() => { e.aplicado = null; });
+  await processarEstudo();
   if (!e.mapa) return;
   atualizar(() => { E.mapaRegiaoAtivo = e.mapa; E.mapaRegiaoOrigem = "sessao"; });
-  if (E.analise) { await reprocessarComMapa(); navegar("piso"); aviso("Conferência de piso recalculada com o mapa de região desta sessão."); }
-  else aviso("Mapa de região ativado nesta sessão. Importe os relatórios para ver a conferência de piso por região.");
+  if (E.analise) await reprocessarComMapa();
+  atualizar(() => { e.aplicado = { antes, depois: E.analise ? errosPiso().length : null, limiar: e.mapa!.limiar }; });
+}
+
+async function restaurarMapaPublicado() {
+  const m = await carregarMapaRegiaoPublicado();
+  atualizar(() => { E.mapaRegiaoAtivo = m; E.mapaRegiaoOrigem = m ? "github" : ""; E.estudo.aplicado = null; });
+  if (E.analise) await reprocessarComMapa();
+  aviso(m ? "Voltou ao mapa publicado." : "Não há mapa publicado: a conferência usa as regras derivadas da base.");
 }
 
 function telaEstudo(): HTMLElement {
@@ -116,7 +130,7 @@ function telaEstudo(): HTMLElement {
     : "Sem mapa de região ativo: a conferência de piso usa as regras derivadas da base.";
   return h("div", { class: "tela" },
     cabecalho({ area: "Consultar", titulo: "Estudo de regiões", pergunta: "Quais entregadores atendem cada região (CEP), a partir de um histórico grande?",
-      resposta: h("p", null, "Envie uma planilha com bastante histórico. O sistema deriva, com um limiar de confiança, quem atende cada CEP (podendo ser mais de um). Baixe o JSON para versionar como padrão, ou use-o só nesta sessão: a Conferência de piso passa a apontar entregas em região errada com base nele."),
+      resposta: h("p", null, "Envie uma planilha com bastante histórico. O sistema deriva, com um limiar de confiança, quem atende cada CEP (podendo ser mais de um). Um clique gera o mapa e já o usa nesta sessão: a Conferência de piso passa a apontar entregas em região errada com base nele. Baixe o JSON se quiser versioná-lo como padrão."),
       acoes: E.analise ? h("button", { type: "button", class: "btn btn-ghost", on: { click: () => navegar("torre") } }, "Voltar à análise") : null }),
     h("p", { class: "nota" }, ativoNota),
     zonaPlanilhaEstudo(),
@@ -124,18 +138,23 @@ function telaEstudo(): HTMLElement {
       h("div", { class: "filtros-controles" },
         h("label", { class: "sel-ordem" }, h("span", null, "Limiar de confiança"),
           h("input", { type: "number", id: "est-lim", min: "1", max: "100", value: String(e.limiar), style: { width: "90px" },
-            on: { input: (ev: Event) => { e.limiar = Math.max(1, Math.min(100, Number((ev.target as HTMLInputElement).value) || 10)); } } })),
-        h("button", { type: "button", class: "btn btn-pri", on: { click: () => processarEstudo() } }, e.processando ? "Processando…" : "Derivar regras de região")),
-      h("p", { class: "nota" }, "Um entregador entra na regra de um CEP quando tem pelo menos “limiar” entregas ali; o entregador com mais entregas é sempre mantido. Limiar alto = regra mais criteriosa, menos falsos positivos.")) : null,
+            on: { input: (ev: Event) => { e.limiar = Math.max(1, Math.min(100, Number((ev.target as HTMLInputElement).value) || 5)); } } })),
+        h("button", { type: "button", class: "btn btn-pri", disabled: e.processando, on: { click: () => aplicarEstudo() } }, icone("ok", "ic ic-sm"), e.processando ? "Processando…" : "Gerar e usar este mapa"),
+        E.mapaRegiaoOrigem === "sessao" ? h("button", { type: "button", class: "btn btn-ghost", disabled: e.processando, on: { click: () => restaurarMapaPublicado() } }, "Voltar ao mapa publicado") : null),      h("p", { class: "nota" }, "Um entregador entra na regra de uma região (CEP, bairro ou cidade) quando tem pelo menos “limiar” entregas ali E pelo menos 5% das entregas da região; o entregador com mais entregas é sempre mantido. Limiar MENOR aceita mais gente por região (menos alertas falsos, detecção um pouco menor); limiar MAIOR deixa quase só o entregador principal (mais alertas). Os totais de CEPs, entregadores e cidades não mudam com o limiar, porque todo CEP guarda ao menos o entregador principal: o que muda é quantos CEPs têm mais de um entregador e quantos alertas de piso saem. Padrão 5 (docs/CALIBRACAO_REGIAO.md).")) : null,
     m && r ? [
       h("div", { class: "kpis kpis-4" },
         kpi({ rotulo: "CEPs mapeados", valor: r.ceps, nota: `Limiar ${m.limiar}` }),
         kpi({ rotulo: "CEPs com +1 entregador", valor: r.multi, tom: r.multi ? "atencao" : undefined, nota: "Regiões compartilhadas" }),
         kpi({ rotulo: "Entregadores", valor: r.ents, nota: "Com região atribuída" }),
         kpi({ rotulo: "Cidades", valor: r.cidades, nota: "No fallback" })),
+      e.aplicado ? h("div", { class: "alerta-caixa tom-ok", role: "status" }, icone("ok"),
+        h("div", null, h("strong", null, `Mapa com limiar ${e.aplicado.limiar} ativo nesta sessão`),
+          e.aplicado.depois === null
+            ? h("p", null, "Importe os dois relatórios para ver a conferência de piso por região.")
+            : h("p", null, `Alertas de piso: ${e.aplicado.antes === null ? "" : `${fmtN(e.aplicado.antes)} → `}${fmtN(e.aplicado.depois)}. Mude o limiar e clique de novo para comparar.`),
+          h("button", { type: "button", class: "btn btn-sec", on: { click: () => navegar("piso", { de: "estudo" }) } }, "Ver conferência de piso", icone("seta", "ic ic-sm")))) : null,
       h("div", { class: "bloco-cab" }, h("h2", null, "Mapeamento"),
         h("div", { class: "conf-acoes" },
-          h("button", { type: "button", class: "btn btn-pri", on: { click: () => usarMapaNaSessao() } }, icone("ok", "ic ic-sm"), "Usar neste navegador"),
           h("button", { type: "button", class: "btn btn-sec", on: { click: () => baixarMapaRegiao() } }, icone("baixar", "ic ic-sm"), "Baixar JSON"))),
       abas("est-aba", [{ id: "cep" as const, rotulo: "Por CEP" }, { id: "entregador" as const, rotulo: "Por entregador" }], e.aba, (v) => atualizar(() => { e.aba = v; })),
       e.aba === "cep" ? tabelaCep(m) : tabelaEntregador(m),
@@ -227,7 +246,7 @@ function telaNaoRecebido(): HTMLElement {
       h("section", { class: "bloco" }, h("div", { class: "bloco-cab" }, h("h2", null, "Encomendas")),
         tabela({ id: "nr-tab", titulo: "Não recebido, com indício de entrega", linhas, chave: (l) => l.awb, porPagina: 50, onAbrir: (l) => abrirAwb(l.awb),
           colunas: [
-            { id: "awb", rotulo: "Waybill No", valor: (l) => l.awb, classe: "mono" },
+            { id: "awb", rotulo: "Waybill No", valor: (l) => l.awb, classe: "mono", render: (l) => awbComCopia(l.awb) },
             { id: "ent", rotulo: "Entregador", valor: (l) => entregadorDe(l.d) },
             { id: "status", rotulo: "Last Scan Status", valor: (l) => String(l.d["Last Scan Status"] ?? ""), render: (l) => valorTexto("Last Scan Status", l.d["Last Scan Status"]) },
             { id: "problema", rotulo: "Last Problem Type", valor: (l) => String(l.d["Last Problem Type"] ?? ""), render: (l) => valorTexto("Last Problem Type", l.d["Last Problem Type"]) },

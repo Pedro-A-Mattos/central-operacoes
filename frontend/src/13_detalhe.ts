@@ -30,7 +30,7 @@ function motivosAtual(r: RegAtual): Filho[] {
   if (r.backlog_dias !== null) m.push(h("li", null, `Chegou ao galpão há ${fmtDias(r.backlog_dias)} (até ${fmtData(a.referencia_backlog)}), faixa `, h("strong", null, r.faixa_backlog || "—"), "."));
   else m.push(h("li", null, "Sem data de chegada válida: fica fora das faixas de tempo."));
   if (r.erro_piso) m.push(h("li", { class: "m-critico" }, h("strong", null, r.erro_piso.tipo + ": "), r.erro_piso.detalhe,
-    r.erro_piso.esperados.length ? ` Válidos pela regra ${r.erro_piso.escopo === "bairro" ? "do bairro" : "da cidade"} (${r.erro_piso.origem_regra}): ${r.erro_piso.esperados.join(", ")}.` : ""));
+    r.erro_piso.esperados.length ? ` Válidos pela regra ${ROTULO_ESCOPO[r.erro_piso.escopo] || "da cidade"} (${r.erro_piso.origem_regra}): ${r.erro_piso.esperados.join(", ")}.` : ""));
   else if (!a.regras.cidades_ignoradas.includes(String(d["Consignee City"]))) m.push(h("li", null, "Conferência de piso: cidade e entregador dentro da regra."));
   else m.push(h("li", null, "A cidade está fora da conferência de piso."));
   const cont = d["Delivery Count"];
@@ -38,6 +38,9 @@ function motivosAtual(r: RegAtual): Filho[] {
   if (r.excecoes.includes("revisar_tentativas")) m.push(h("li", { class: "m-atencao" }, h("strong", null, "3+ tentativas, revisar: "), `${cont} tentativas, mas o último motivo (“${d["Last Problem Reason"] ?? d["Last Problem Type"] ?? "não informado"}”) não é ausência nem recusa. Por isso não conta como devolução.`));
   if (r.excecoes.includes("extravio")) m.push(h("li", { class: "m-critico" }, h("strong", null, "Extravio: "), "o tipo ou motivo do problema contém “lost” ou “extravi”."));
   if (r.excecoes.includes("insucesso")) m.push(h("li", { class: "m-atencao" }, h("strong", null, "Insucesso: "), `há problema registrado e ${cont ?? 0} tentativa(s), menos de ${a.parametros.limite_tentativas}. Aguarda nova tentativa.`));
+  if (r.reroteada) m.push(h("li", { class: "m-ok" }, h("strong", null, "Já em rota de novo: "), `a saída para entrega (${fmtData(d["Delivery Time"])}) é posterior à ocorrência (${fmtData(d["Last Problem Date"])}). Não pede mais ação sua.`));
+  else if (r.excecoes.includes("insucesso") && !r.entrega_confirmada) m.push(h("li", { class: "m-atencao" }, h("strong", null, "Sem nova saída para rota: "), `nenhuma saída para entrega depois da ocorrência de ${fmtData(d["Last Problem Date"])}. ${(Number(cont) || 0) >= 2 ? "Colocar em rota e verificar com o entregador se vai devolver." : "Colocar em rota de novo."}`));
+  if (r.backlog_dias !== null && r.backlog_dias >= DIAS_ATRASO && !r.entrega_confirmada) m.push(h("li", { class: "m-atencao" }, h("strong", null, "Pendente há " + DIAS_ATRASO + " dias ou mais: "), `chegou ao galpão há ${fmtDias(r.backlog_dias)}.`));
   const vista = vistaNoHistorico(awbDe(d));
   if (vista && vista.vezes > 1) m.push(h("li", { class: vista.vezes >= 3 ? "m-atencao" : "" }, `Já aparecia como pendente na importação de ${fmtData(vista.primeira)}: está pendente em ${vista.vezes} importações do histórico.`));
   return m;
@@ -48,20 +51,20 @@ function gaveta(): HTMLElement | null {
   const awb = E.drawer; const a = E.analise;
   const ref = E.idx.get(awb);
   const fechar = h("button", { type: "button", class: "btn-icone", id: "gaveta-fechar", "aria-label": "Fechar detalhes", on: { click: fecharAwb } }, icone("fechar"));
-  const copiar = h("button", { type: "button", class: "btn btn-ghost btn-p", on: { click: async () => { try { await navigator.clipboard.writeText(awb); aviso("Código copiado."); } catch { aviso("Selecione o código e copie manualmente.", "info"); } } } }, "Copiar código");
+  const copiar = h("button", { type: "button", class: "btn btn-ghost btn-p", on: { click: () => copiarCodigo(awb) } }, "Copiar código");
   let situacao: Filho[] = [], motivos: Filho[] = [], d: Dados = { "Waybill No": awb }, origem = "", extra: Filho = null;
   if (!ref) {
-    const fm = a.removidas.fm.includes(awb), desc = a.removidas.descarregado.includes(awb), nrec = a.removidas.nao_recebido.includes(awb);
+    const fm = a.removidas.fm.includes(awb), desc = a.removidas.descarregado.includes(awb), nrec = a.removidas.nao_recebido.includes(awb), cruz = (a.removidas.cruzadas || []).includes(awb);
     return h("aside", { class: "gaveta", role: "dialog", "aria-modal": "false", "aria-labelledby": "gav-tit" },
       h("div", { class: "gav-cab" }, h("div", null, h("p", { class: "sobretitulo" }, "Encomenda"), h("h2", { id: "gav-tit", class: "mono" }, awb)), fechar),
-      vazio(fm ? "Removida por força maior" : desc ? "Removida pelo filtro de descarregado" : nrec ? "Removida pelo filtro de não recebido" : "Fora desta análise",
-        fm ? "Encomendas de força maior (FM) são retiradas de toda a análise." : desc ? "O filtro “Ignorar descarregado” está ligado." : nrec ? "O filtro “Ignorar não recebido” está ligado." : "Este código não está em nenhum dos dois relatórios."));
+      vazio(fm ? "Removida por força maior" : desc ? "Removida pelo filtro de descarregado" : nrec ? "Removida pelo filtro de não recebido" : cruz ? "Removida pelo outro relatório" : "Fora desta análise",
+        fm ? "Encomendas de força maior (FM) são retiradas de toda a análise." : desc ? "O filtro “Ignorar descarregado” está ligado." : nrec ? "O filtro “Ignorar não recebido” está ligado." : cruz ? "O outro relatório traz esta encomenda como FM, descarregado, não recebido ou sem cidade, então ela sai da análise nos dois (senão pareceria uma entrega)." : "Este código não está em nenhum dos dois relatórios."));
   }
   if (ref.fonte === "atual") {
     const r = ref.reg; d = r.dados; origem = `Relatório atualizado (${a.arquivos.atual})` + (r.nova ? "" : ` · status anterior do relatório base (${a.arquivos.base})`);
     situacao = [chip("Pendente", "neutro"), r.nova ? chip("Nova", "info") : null, r.erro_piso ? chipErro(r.erro_piso.tipo) : null, ...r.excecoes.map((x) => chip(ROTULO_EXC[x], TOM_EXC[x])), chip(r.classe_operacional, TOM_CLASSE[r.classe_operacional])];
     motivos = motivosAtual(r);
-    if (r.excecoes.length) {
+    if (r.excecoes.length || PEND.atrasadas(r)) {
       const j = a.justificativas[awb];
       extra = h("section", { class: "gav-sec", "aria-labelledby": "gav-just" }, h("h3", { id: "gav-just" }, "Alerta"),
         j ? h("div", { class: "just-ok" }, h("p", null, chip("Justificado", "ok", "ok"), " ", h("strong", null, j.motivo)),
