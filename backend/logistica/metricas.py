@@ -36,6 +36,7 @@ CLASSE_ENTREGUE = "Entregue"
 CLASSE_NAO_ENTREGUE = "Não entregue"
 CLASSE_ANORMAL = "Anormal"
 SEM_ENTREGADOR = "(sem entregador)"
+SEM_CIDADE = "(sem cidade)"
 
 
 def _tem(df: pd.DataFrame, col: str) -> pd.Series:
@@ -192,22 +193,40 @@ def classes_progresso(base: pd.DataFrame, ultima: pd.DataFrame, categoria_saida:
             c = "Entregue" if categoria_saida.get(awb) == "provavel_entrega" else "Saiu"
         classes.append(c)
     ent = base[ENTREGADOR_COL].fillna(SEM_ENTREGADOR).tolist() if ENTREGADOR_COL in base.columns else [SEM_ENTREGADOR] * len(base)
-    return pd.DataFrame({AWB_COL: base[AWB_COL].tolist(), "entregador": ent, "classe": classes})
+    # Cidade da peça NA BASE (o universo do indicador é a base): permite abrir o desempenho por cidade e depois por entregador.
+    cid = base[CIDADE_COL].fillna(SEM_CIDADE).tolist() if CIDADE_COL in base.columns else [SEM_CIDADE] * len(base)
+    return pd.DataFrame({AWB_COL: base[AWB_COL].tolist(), "entregador": ent, "cidade": cid, "classe": classes})
+
+
+def _linha_progresso(g: pd.DataFrame) -> dict:
+    n = g["classe"].value_counts()
+    ja = int(n.get("JaEntregue", 0))
+    total = int(len(g)) - ja
+    entregue = int(n.get("Entregue", 0))
+    # arredonda meio-para-cima (igual ao Math.round do motor local -> paridade)
+    pct = float(np.floor(1000 * entregue / total + 0.5) / 10) if total else 0.0
+    return {"total": total, "entregue": entregue, "anormal": int(n.get("Anormal", 0)), "tratada": int(n.get("Tratada", 0)),
+            "pendente": int(n.get("Pendente", 0)), "pct_entregue": pct, "ja_entregues": ja}
 
 
 def desempenho_progresso(base: pd.DataFrame, ultima: pd.DataFrame, categoria_saida: dict) -> pd.DataFrame:
     cl = classes_progresso(base, ultima, categoria_saida)
-    linhas = []
-    for ent, g in cl.groupby("entregador", sort=True):
-        n = g["classe"].value_counts()
-        ja = int(n.get("JaEntregue", 0))
-        total = int(len(g)) - ja
-        entregue = int(n.get("Entregue", 0))
-        # arredonda meio-para-cima (igual ao Math.round do motor local -> paridade)
-        pct = float(np.floor(1000 * entregue / total + 0.5) / 10) if total else 0.0
-        linhas.append({"entregador": ent, "total": total, "entregue": entregue, "anormal": int(n.get("Anormal", 0)), "tratada": int(n.get("Tratada", 0)),
-                       "pendente": int(n.get("Pendente", 0)), "pct_entregue": pct, "ja_entregues": ja})
+    linhas = [{"entregador": ent, **_linha_progresso(g)} for ent, g in cl.groupby("entregador", sort=True)]
     return pd.DataFrame(linhas, columns=["entregador", "total", "entregue", "anormal", "tratada", "pendente", "pct_entregue", "ja_entregues"])
+
+
+def desempenho_progresso_cidade(cl: pd.DataFrame) -> list[dict]:
+    """Mesma conta de `desempenho_progresso`, uma linha por (cidade, entregador), a partir de `classes_progresso`.
+    A soma das linhas de um entregador dá a linha dele em `desempenho_progresso`. Cada linha leva os AWBs por classe
+    (os que estão no recorte), para abrir a lista da cidade sem recalcular nada na tela."""
+    saida = []
+    for (cid, ent), g in cl.groupby(["cidade", "entregador"], sort=True):
+        awbs: dict[str, list[str]] = {}
+        for awb, c in zip(g[AWB_COL], g["classe"]):
+            if c in CLASSES_PROGRESSO:
+                awbs.setdefault(c, []).append(awb)
+        saida.append({"cidade": cid, "entregador": ent, **_linha_progresso(g), "awbs": awbs})
+    return saida
 
 
 def linhas_classificadas_entregador(base: pd.DataFrame, ultima: pd.DataFrame, entregues_ids: set[str]) -> pd.DataFrame:

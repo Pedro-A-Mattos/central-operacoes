@@ -44,10 +44,13 @@ interface RegSaiu {
 interface LinhaDesempenho {
   entregador: string; total: number; entregue: number; anormal: number; tratada: number; pendente: number; pct_entregue: number; ja_entregues: number;
 }
+// Uma linha por (cidade, entregador); a cidade é a da peça na base. `awbs` = AWBs por classe daquela linha.
+interface LinhaDesempenhoCidade extends LinhaDesempenho { cidade: string; awbs: Record<string, string[]> }
 interface Desempenho {
   dias: string[];
   linhas: LinhaDesempenho[];
   awbs: Record<string, Record<string, string[]>>;
+  por_cidade: LinhaDesempenhoCidade[];
 }
 
 interface Justificativa { motivo: string; observacao: string; reavaliar_em: string; criada_em: string; }

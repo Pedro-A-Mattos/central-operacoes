@@ -459,7 +459,8 @@ def desempenho(base_f: pd.DataFrame, ult_f: pd.DataFrame, dias: list[str]) -> di
     for awb, ent, c in zip(cl[cmp.AWB_COL], cl["entregador"], cl["classe"]):
         if c in met.CLASSES_PROGRESSO:
             classes.setdefault(ent, {}).setdefault(c, []).append(awb)
-    return {"dias": list(dias or []), "linhas": tab.to_dict(orient="records"), "awbs": classes}
+    return {"dias": list(dias or []), "linhas": tab.to_dict(orient="records"), "awbs": classes,
+            "por_cidade": met.desempenho_progresso_cidade(cl)}
 
 
 def simular_regras(base_f: pd.DataFrame, ult_f: pd.DataFrame, atual: dict, novo: dict) -> dict:

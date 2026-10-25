@@ -109,6 +109,24 @@ def test_c01_entrega_anterior_a_base_nao_conta_como_progresso():
     assert linha["entregue"] == 0 and linha["pct_entregue"] == 0.0
 
 
+# ----------------------------------------------------------------- desempenho por cidade × entregador
+def test_desempenho_por_cidade_soma_igual_ao_por_entregador():
+    """A divisão por cidade não pode mudar nenhum número: somando as cidades de um entregador, sai a linha dele."""
+    base = rel(L(1), L(2, cidade="Buritis"), L(3, cidade="Buritis"), L(4, ent="Bia"), L(5, ent="Bia", cidade="Buritis"), L(6, status="Entregue", sign="2026-10-11 09:00:00"))
+    atual = rel(L(1, prob="Não entregue", motivo="x", lpd="2026-10-12 07:00:00", cont=1), L(3, cidade="Buritis"), L(5, ent="Bia", cidade="Buritis", status="Entregue", sign="2026-10-12 09:00:00"))
+    d = rodar(base, atual)["desempenho"]
+    campos = ("total", "entregue", "anormal", "tratada", "pendente", "ja_entregues")
+    for linha in d["linhas"]:
+        partes = [c for c in d["por_cidade"] if c["entregador"] == linha["entregador"]]
+        assert {k: sum(c[k] for c in partes) for k in campos} == {k: linha[k] for k in campos}, linha["entregador"]
+    ana_buritis = next(c for c in d["por_cidade"] if (c["cidade"], c["entregador"]) == ("Buritis", "Ana"))
+    assert ana_buritis["total"] == 2 and ana_buritis["pendente"] == 1  # a 3 segue; a 2 sumiu (provável entrega)
+    assert ana_buritis["entregue"] == 1 and ana_buritis["awbs"]["Entregue"] == ["2"] and ana_buritis["awbs"]["Pendente"] == ["3"]
+    assert ana_buritis["pct_entregue"] == 50.0
+    # ordem estável: cidade e depois entregador
+    assert [(c["cidade"], c["entregador"]) for c in d["por_cidade"]] == sorted((c["cidade"], c["entregador"]) for c in d["por_cidade"])
+
+
 # ----------------------------------------------------------------- H-03 filtros assimétricos
 @pytest.mark.parametrize("alteracao", [{"status": "descarregado"}, {"prob": "Ocorrênia FM", "motivo": "x", "lpd": "2026-10-12 07:00:00", "cont": 1},
                                        {"status": "Não recebido"}, {"cidade": None}])

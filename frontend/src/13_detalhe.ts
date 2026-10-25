@@ -27,8 +27,8 @@ function motivosAtual(r: RegAtual): Filho[] {
   else if (r.classe_operacional === "Entregue") m.push(h("li", null, "Classe operacional ", h("strong", null, "Entregue"), `: ${d["Sign Date"] ? "há data de assinatura" : "o status indica entrega"} no relatório. Mesmo assim segue contada como pendente, porque está no relatório atualizado (RN-003).`));
   else m.push(h("li", null, "Classe operacional ", h("strong", null, "Não entregue"), ": sem problema e sem entrega confirmada no relatório."));
   if (r.em_rota_min !== null) m.push(h("li", { class: r.em_rota_min >= 1440 ? "m-atencao" : "" }, `Saiu para entrega há ${fmtMin(r.em_rota_min)} (Delivery Time ${fmtData(d["Delivery Time"])}), sem entrega confirmada.`));
-  if (r.backlog_dias !== null) m.push(h("li", null, `Chegou ao galpão há ${fmtDias(r.backlog_dias)} (até ${fmtData(a.referencia_backlog)}), faixa `, h("strong", null, r.faixa_backlog || "—"), "."));
-  else m.push(h("li", null, "Sem data de chegada válida: fica fora das faixas de tempo."));
+  if (r.backlog_dias !== null) m.push(h("li", null, `Chegou ao galpão em ${fmtData(d["Arrival Time"])}, há ${fmtDias(r.backlog_dias)} (até ${fmtData(a.referencia_backlog)}).`));
+  else m.push(h("li", null, "Sem data de chegada válida: fica fora do cálculo de tempo de espera."));
   if (r.erro_piso) m.push(h("li", { class: "m-critico" }, h("strong", null, r.erro_piso.tipo + ": "), r.erro_piso.detalhe,
     r.erro_piso.esperados.length ? ` Válidos pela regra ${ROTULO_ESCOPO[r.erro_piso.escopo] || "da cidade"} (${r.erro_piso.origem_regra}): ${r.erro_piso.esperados.join(", ")}.` : ""));
   else if (!a.regras.cidades_ignoradas.includes(String(d["Consignee City"]))) m.push(h("li", null, "Conferência de piso: cidade e entregador dentro da regra."));
@@ -41,7 +41,8 @@ function motivosAtual(r: RegAtual): Filho[] {
   if (r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria")) m.push(h("li", { class: "m-atencao" }, h("strong", null, "Insucesso: "), `há problema registrado e ${cont ?? 0} tentativa(s), menos de ${a.parametros.limite_tentativas}. Aguarda nova tentativa.`));
   if (r.reroteada) m.push(h("li", { class: "m-ok" }, h("strong", null, "Já em rota de novo: "), `a saída para entrega (${fmtData(d["Delivery Time"])}) é posterior à ocorrência (${fmtData(d["Last Problem Date"])}). Não pede mais ação sua.`));
   else if (r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria") && (Number(cont) || 0) >= 1 && !r.entrega_confirmada) m.push(h("li", { class: "m-atencao" }, h("strong", null, "Sem nova saída para rota: "), `nenhuma saída para entrega depois da ocorrência de ${fmtData(d["Last Problem Date"])}. ${(Number(cont) || 0) >= 2 ? "Colocar em rota e verificar com o entregador se vai devolver." : "Colocar em rota de novo."}`));
-  if (r.backlog_dias !== null && r.backlog_dias >= DIAS_ATRASO && !r.entrega_confirmada) m.push(h("li", { class: "m-atencao" }, h("strong", null, "Pendente há " + DIAS_ATRASO + " dias ou mais: "), `chegou ao galpão há ${fmtDias(r.backlog_dias)}.`));
+  const pend = motivoPendencia(r);
+  m.push(h("li", { class: pend.pendente ? "m-atencao" : "m-ok" }, h("strong", null, pend.pendente ? "Conta como pendência: " : "Não conta como pendência: "), pend.motivo));
   const vista = vistaNoHistorico(awbDe(d));
   if (vista && vista.vezes > 1) m.push(h("li", { class: vista.vezes >= 3 ? "m-atencao" : "" }, `Já aparecia como pendente na importação de ${fmtData(vista.primeira)}: está pendente em ${vista.vezes} importações do histórico.`));
   return m;

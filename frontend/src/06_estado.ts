@@ -8,7 +8,8 @@ interface SelecaoGrafico { dim: "cidade" | "entregador" | "faixa" | "problema" |
 interface FiltrosPend { ocorrencia: "" | "vigente" | "tratada"; cidades: string[]; bairros: string[]; classes: string[]; faixas: string[]; rota: string[]; dias: string[]; soProblema: boolean; semEntregador: boolean; sel: SelecaoGrafico | null }
 interface FiltrosPiso { tipos: string[]; cidades: string[]; bairros: string[]; entregadores: string[]; vista?: "tabela" | "roteiro" }
 interface FiltrosExc { aba: AbaPend; cidades: string[]; bairros: string[]; entregadores: string[] }
-interface FiltrosEnt { dias: string[]; ordem: "total" | "pct_desc" | "pct_asc" | "anormal" | "pendente" | "rua"; sel: { entregador: string; classe: string | null } | null; realce: string | null }
+// `agrupar`: "entregador" (uma linha por pessoa) ou "cidade" (cidade e, dentro dela, cada entregador). `sel.cidade` só existe no segundo.
+interface FiltrosEnt { dias: string[]; ordem: "total" | "pct_desc" | "pct_asc" | "anormal" | "pendente" | "rua"; agrupar: "entregador" | "cidade"; sel: { entregador: string; cidade?: string; classe: string | null } | null; realce: string | null }
 
 type RefAwb =
   | { fonte: "atual"; reg: RegAtual }
@@ -17,9 +18,10 @@ type RefAwb =
 
 const filtrosVazios = () => ({
   pendencias: { ocorrencia: "", cidades: [], bairros: [], classes: [], faixas: [], rota: [], dias: [], soProblema: false, semEntregador: false, sel: null } as FiltrosPend,
+  pivot: { dims: ["cidade"], datasFora: [], fechados: [], cel: null } as EstadoPivot,
   piso: { tipos: [], cidades: [], bairros: [], entregadores: [] } as FiltrosPiso,
   excecoes: { aba: "atrasadas", cidades: [], bairros: [], entregadores: [] } as FiltrosExc,
-  entregadores: { dias: [], ordem: "total", sel: null, realce: null } as FiltrosEnt,
+  entregadores: { dias: [], ordem: "total", agrupar: "entregador", sel: null, realce: null } as FiltrosEnt,
   aEntregar: { cidade: "", entregador: "" },
   mudancas: { aba: "provavel_entrega" as "provavel_entrega" | "possivel_devolucao" | "ja_entregue" | "saiu_com_ocorrencia" | "novas" | "status" },
   fora: { aba: "atual" as "atual" | "base" },
@@ -107,20 +109,51 @@ const justificada = (awb: string) => !!E.analise && !!E.analise.justificativas[a
 // avaria, e não entra nas de tentativas. Peça com 0 tentativas e outro problema também não é "1 tentativa".
 type AcaoPend = "atrasadas" | "tent1" | "tent2" | "tent3" | "extravio" | "avaria" | "ja_em_rota";
 type AbaPend = AcaoPend | "justificados";
-const DIAS_ATRASO = 2;
 const tentativasDe = (r: RegAtual) => Number(r.dados["Delivery Count"]) || 0;
+
+// Regra de pendência (alinhada com a operação em 24/10/2026). É pendência:
+//   · toda peça de Unaí, qualquer que seja a data de chegada;
+//   · nas demais cidades, a peça que chegou ANTES do dia da referência (prazo de um dia vencido).
+// Não é pendência: peça das demais cidades que chegou no mesmo dia da referência; peça com entrega confirmada;
+// peça com tentativa de entrega registrada no dia da referência (ela vai para as listas de tentativas).
+// Sem data de chegada: conta como pendência, porque não dá para provar que chegou hoje.
+const CIDADE_SEM_PRAZO = "unai";
+const refDiaAnalise = () => (E.analise ? E.analise.referencia_backlog.slice(0, 10) : "");
+const ehCidadeSemPrazo = (r: RegAtual) => normalizarBusca(String(r.dados["Consignee City"] ?? "")) === CIDADE_SEM_PRAZO;
+function tentativaNoDia(r: RegAtual, refDia: string): boolean {
+  if (tentativasDe(r) < 1) return false;
+  const dt = paraData(r.dados["Last Problem Date"]);
+  return !!dt && diaIso(dt) === refDia;
+}
+// Por que a peça é (ou não) pendência: o texto serve à tela e à gaveta da encomenda.
+function motivoPendencia(r: RegAtual, refDia = refDiaAnalise()): { pendente: boolean; motivo: string } {
+  if (r.entrega_confirmada) return { pendente: false, motivo: "Entrega confirmada no relatório." };
+  if (tentativaNoDia(r, refDia)) return { pendente: false, motivo: "Teve tentativa de entrega no dia da referência: sai da lista de pendentes e aparece nas listas de tentativas." };
+  if (ehCidadeSemPrazo(r)) return { pendente: true, motivo: "Peça de Unaí: é pendência qualquer que seja a data de chegada." };
+  const dia = diaChegada(r);
+  if (dia === SEM_DATA) return { pendente: true, motivo: "Sem data de chegada: não dá para provar que chegou hoje, então conta como pendência." };
+  if (dia < refDia) return { pendente: true, motivo: `Chegou em ${fmtDia(dia)}, antes do dia da referência (${fmtDia(refDia)}): o prazo de um dia já venceu.` };
+  return { pendente: false, motivo: `Chegou no dia da referência (${fmtDia(refDia)}) e não é de Unaí: ainda está dentro do prazo.` };
+}
+const ehPendencia = (r: RegAtual, refDia = refDiaAnalise()) => motivoPendencia(r, refDia).pendente;
+
+// 1 e 2 tentativas listam TODA peça com essa quantidade de tentativas e problema (inclusive a que já saiu para rota de novo,
+// que aparece com a marca "já em rota"). Só pede ação sua a que ainda não saiu: ver `pedeAcao`.
 const PEND: Record<AcaoPend, (r: RegAtual) => boolean> = {
-  atrasadas: (r) => r.backlog_dias !== null && r.backlog_dias >= DIAS_ATRASO && !r.entrega_confirmada,
-  tent1: (r) => r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria") && tentativasDe(r) === 1 && !r.reroteada && !r.entrega_confirmada,
-  tent2: (r) => r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria") && tentativasDe(r) === 2 && !r.reroteada && !r.entrega_confirmada,
+  atrasadas: (r) => ehPendencia(r),
+  tent1: (r) => r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria") && tentativasDe(r) === 1 && !r.entrega_confirmada,
+  tent2: (r) => r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria") && tentativasDe(r) === 2 && !r.entrega_confirmada,
   tent3: (r) => (r.excecoes.includes("devolucao") || (r.excecoes.includes("revisar_tentativas") && !r.excecoes.includes("avaria"))) && !r.entrega_confirmada,
   extravio: (r) => r.excecoes.includes("extravio"),
   avaria: (r) => r.excecoes.includes("avaria") && !r.entrega_confirmada,
   ja_em_rota: (r) => r.excecoes.includes("insucesso") && !r.excecoes.includes("avaria") && r.reroteada && !r.entrega_confirmada,
 };
 const ACOES_URGENTES: AcaoPend[] = ["atrasadas", "tent1", "tent2", "tent3", "extravio", "avaria"];
+// Peça de 1 ou 2 tentativas que já saiu para rota de novo não pede ação: fica na lista, marcada, mas fora dos alertas.
+const pedeAcao = (a: AcaoPend, r: RegAtual) => !((a === "tent1" || a === "tent2") && r.reroteada);
 const pendAtivas = (a: AcaoPend) => (E.analise ? E.analise.atual.filter((r) => PEND[a](r) && !justificada(awbDe(r.dados))) : []);
-const pendPrecisaAcao = (r: RegAtual) => !justificada(awbDe(r.dados)) && ACOES_URGENTES.some((a) => PEND[a](r));
+const pendAcao = (a: AcaoPend) => pendAtivas(a).filter((r) => pedeAcao(a, r));
+const pendPrecisaAcao = (r: RegAtual) => !justificada(awbDe(r.dados)) && ACOES_URGENTES.some((a) => PEND[a](r) && pedeAcao(a, r));
 const pendJustificadas = () => (E.analise ? E.analise.atual.filter((r) => justificada(awbDe(r.dados)) && (r.excecoes.length || PEND.atrasadas(r))) : []);
 const errosPiso = () => (E.analise ? E.analise.atual.filter((r) => r.erro_piso) : []);
 

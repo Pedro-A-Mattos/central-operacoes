@@ -12,7 +12,7 @@ function telaTorre(): HTMLElement {
   const a = E.analise!;
   const piso = errosPiso();
   const porTipo = contar(piso, (r) => r.erro_piso!.tipo);
-  const t1 = pendAtivas("tent1"), t2 = pendAtivas("tent2"), t3 = pendAtivas("tent3"), ext = pendAtivas("extravio"), avr = pendAtivas("avaria"), atr = pendAtivas("atrasadas");
+  const t1 = pendAcao("tent1"), t2 = pendAcao("tent2"), t3 = pendAtivas("tent3"), ext = pendAtivas("extravio"), avr = pendAtivas("avaria"), atr = pendAtivas("atrasadas");
   const velhas = a.atual.filter((r) => r.faixa_backlog === "4+ dias");
   const comProblema = a.atual.filter((r) => r.dados["Last Problem Type"] !== null);
   const vigentes = comProblema.filter((r) => !r.reroteada && !r.entrega_confirmada);
@@ -34,7 +34,7 @@ function telaTorre(): HTMLElement {
   if (avr.length) alertas.push({ tom: "critico", n: avr.length, texto: `${plural(avr.length, "encomenda com avaria", "encomendas com avaria")}: seguir o processo de avaria (sinalizar o piso e pedir aprovação)`, origem: "Pendências de entrega", acao: "Seguir o processo de avaria", ir: irPend3("avaria") });
   if (t2.length) alertas.push({ tom: "atencao", n: t2.length, texto: `${plural(t2.length, "encomenda com", "encomendas com")} 2 tentativas e sem nova saída para rota: colocar em rota e ver com o entregador se devolve`, origem: "Pendências de entrega", acao: "Colocar em rota e ver devolução", ir: irPend3("tent2") });
   if (t1.length) alertas.push({ tom: "atencao", n: t1.length, texto: `${plural(t1.length, "encomenda com", "encomendas com")} 1 tentativa e sem nova saída para rota: colocar em rota de novo`, origem: "Pendências de entrega", acao: "Colocar em rota", ir: irPend3("tent1") });
-  if (atr.length) alertas.push({ tom: "atencao", n: atr.length, texto: `${plural(atr.length, "encomenda pendente", "encomendas pendentes")} há ${DIAS_ATRASO} dias ou mais`, origem: "Pendências de entrega", acao: "Cobrar a entrega", ir: irPend3("atrasadas") });
+  if (atr.length) alertas.push({ tom: "atencao", n: atr.length, texto: `${plural(atr.length, "encomenda pendente", "encomendas pendentes")}: peças de Unaí e das demais cidades que chegaram antes de ${fmtDia(refDiaAnalise())}`, origem: "Pendências de entrega", acao: "Cobrar a entrega", ir: irPend3("atrasadas") });
   const longas = a.atual.filter((r) => faixaRota(r) === "Mais de 24 h");
   if (longas.length) alertas.push({ tom: "atencao", n: longas.length, texto: `${plural(longas.length, "encomenda saiu", "encomendas saíram")} para entrega há mais de 24 h e ${longas.length === 1 ? "segue" : "seguem"} sem entrega confirmada`, origem: "Pendências · tempo em rota", acao: "Cobrar retorno do entregador",
     ir: () => navegar("pendencias", { de: "torre", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, rota: ["Mais de 24 h"] }; } }) });
@@ -62,7 +62,11 @@ function telaTorre(): HTMLElement {
     funilTotais(a));
 
   const irPend = (prep: (f: FiltrosPend) => void) => navegar("pendencias", { de: "torre", prep: () => { const f = filtrosVazios().pendencias; prep(f); E.f.pendencias = f; } });
-  const faixas = (["0-1 dia", "2-3 dias", "4+ dias"] as Faixa[]).map((f) => ({ rotulo: f, valor: a.atual.filter((r) => r.faixa_backlog === f).length, tom: TOM_FAIXA[f] }));
+  const refDia = a.referencia_backlog.slice(0, 10);
+  const chegadas: ItemBarra[] = diasDoRecorte(a.atual).filter((x) => x.dia !== SEM_DATA).map(({ dia, n }) => {
+    const idade = idadeEmDias(dia, refDia); const tom = tomIdade(idade);
+    return { rotulo: `${fmtDiaCurto(dia)} · ${rotuloIdade(idade)}`, chave: dia, valor: n, tom: tom === "neutro" ? undefined : tom };
+  });
 
   return h("div", { class: "tela" },
     cabecalho({ area: "Visão central", titulo: "Torre de controle", pergunta: "Como está a operação e o que precisa da minha atenção?" }),
@@ -76,9 +80,9 @@ function telaTorre(): HTMLElement {
     h("div", { class: "graficos g2" },
       barras({ id: "t-cid", ajuda: "por_cidade", titulo: "Pendências por cidade", descricao: "Encomendas no relatório atualizado. Clique para ver a lista.", unidade: ["encomenda", "encomendas"],
         itens: contar(a.atual, (r) => r.dados["Consignee City"] as string), max: 8, onSelecionar: (it) => it && irPend((f) => { f.sel = { dim: "cidade", valor: it.rotulo, rotulo: "Cidade: " + it.rotulo }; }) }),
-      barras({ id: "t-fx", ajuda: "tempo_espera", titulo: "Há quanto tempo aguardam", descricao: `Dias desde a chegada ao galpão até ${fmtData(a.referencia_backlog)}.`, unidade: ["encomenda", "encomendas"], itens: faixas,
-        onSelecionar: (it) => it && irPend((f) => { f.faixas = [it.rotulo]; }),
-        legenda: semData || depoisRef ? `${[semData ? `${plural(semData, "encomenda", "encomendas")} sem data de chegada` : "", depoisRef ? `${plural(depoisRef, "encomenda chegou", "encomendas chegaram")} DEPOIS da data de referência (revise a referência)` : ""].filter(Boolean).join(" e ")} ficam fora das faixas.` : null }),
+      barras({ id: "t-fx", ajuda: "pivot_chegada", titulo: "Pendentes por data de chegada", descricao: `Dia de chegada ao galpão, até ${fmtData(a.referencia_backlog)}. Clique num dia; a tabela por cidade está em Pendências.`, unidade: ["encomenda", "encomendas"], itens: chegadas,
+        onSelecionar: (it) => it && irPend((f) => { f.dias = [it.chave as string]; }),
+        legenda: semData || depoisRef ? `${[semData ? `${plural(semData, "encomenda", "encomendas")} sem data de chegada` : "", depoisRef ? `${plural(depoisRef, "encomenda chegou", "encomendas chegaram")} DEPOIS da data de referência (revise a referência)` : ""].filter(Boolean).join(" e ")}.` : null }),
       barras({ id: "t-prob", ajuda: "tipos_problema", titulo: "Ocorrências registradas", descricao: "Tipo do último problema nas pendentes.", unidade: ["encomenda", "encomendas"],
         itens: contar(comProblema, (r) => r.dados["Last Problem Type"] as string).map((x) => ({ ...x, tom: "atencao" as Tom })), max: 6,
         onSelecionar: (it) => it && irPend((f) => { f.sel = { dim: "problema", valor: it.rotulo, rotulo: "Problema: " + it.rotulo }; }), vazio: "Nenhuma pendente com problema registrado." }),
@@ -98,7 +102,9 @@ function telaTorre(): HTMLElement {
 
 // Conferência de totais: de quantas linhas do arquivo até o número de pendentes.
 // Usa só `etapas`, que os dois motores já devolvem, para o funil nunca divergir.
-function funilTotais(a: Analise, aberto = true): HTMLElement {
+// Com `ate = "piso"`, o funil continua até as encomendas realmente conferidas na Conferência de piso
+// (descontando as cidades fora da conferência), para o total bater com a tela.
+function funilTotais(a: Analise, aberto = true, ate: "pendentes" | "piso" = "pendentes"): HTMLElement {
   const e = a.etapas, par = a.parametros;
   type Passo = { rotulo: string; n: number; nota: string; ir?: () => void };
   const retiradas: Passo[] = [];
@@ -114,14 +120,21 @@ function funilTotais(a: Analise, aberto = true): HTMLElement {
     { rotulo: "Sem cidade", n: e.fora_atual, nota: "Sem cidade de destino: ficam em Fora da jurisdição", ir: () => navegar("fora", { de: "torre" }) },
     { rotulo: "Retiradas pelo outro relatório", n: e.cruzadas_atual ?? 0, nota: "O relatório base traz a peça como FM, descarregado, não recebido ou sem cidade: ela sai da análise nos dois" });
   const conferem = linhasArquivo - retiradas.reduce((s, r) => s + r.n, 0) === a.resumo.ultima_total;
+  let total = a.resumo.ultima_total, rotuloTotal = "Encomendas no relatório atualizado";
+  if (ate === "piso") {
+    const ign = new Set(a.regras.cidades_ignoradas);
+    const nIgn = ign.size ? a.atual.filter((r) => ign.has(String(r.dados["Consignee City"]))).length : 0;
+    retiradas.push({ rotulo: "Cidades fora da conferência", n: nIgn, nota: ign.size ? `Cidades marcadas para não conferir: ${[...ign].join(", ")}` : "Nenhuma cidade marcada para ficar de fora" });
+    total -= nIgn; rotuloTotal = "Encomendas conferidas no piso";
+  }
   return h("details", { class: "funil", open: aberto },
-    h("summary", null, h("strong", null, "Como chegamos a este número"), h("span", { class: "funil-resumo" }, `${fmtN(linhasArquivo)} → ${fmtN(a.resumo.ultima_total)}`)),
+    h("summary", null, h("strong", null, "Como chegamos a este número"), h("span", { class: "funil-resumo" }, `${fmtN(linhasArquivo)} → ${fmtN(total)}`)),
     h("ol", { class: "funil-lista", "aria-label": "Conferência de totais do relatório atualizado" },
       h("li", { class: "funil-linha" }, h("span", { class: "funil-sinal", "aria-hidden": "true" }), h("span", { class: "funil-rot" }, arq ? "Linhas no arquivo atualizado" : "Códigos únicos no relatório atualizado"), h("strong", null, fmtN(linhasArquivo))),
       retiradas.map((r) => h("li", { class: "funil-linha" + (r.n ? "" : " zero") },
         h("span", { class: "funil-sinal", "aria-hidden": "true" }, "−"),
         h("span", { class: "funil-rot" }, r.ir && r.n ? h("button", { type: "button", class: "link", on: { click: r.ir } }, r.rotulo) : r.rotulo, h("small", null, r.nota)),
         h("strong", null, fmtN(r.n)))),
-      h("li", { class: "funil-linha total" }, h("span", { class: "funil-sinal", "aria-hidden": "true" }, "="), h("span", { class: "funil-rot" }, "Encomendas no relatório atualizado"), h("strong", null, fmtN(a.resumo.ultima_total)))),
+      h("li", { class: "funil-linha total" }, h("span", { class: "funil-sinal", "aria-hidden": "true" }, "="), h("span", { class: "funil-rot" }, rotuloTotal), h("strong", null, fmtN(total)))),
     conferem ? null : h("p", { class: "nota" }, "Os passos não somam exatamente porque algum filtro atua nos dois relatórios; confira em Importação e critérios."));
 }

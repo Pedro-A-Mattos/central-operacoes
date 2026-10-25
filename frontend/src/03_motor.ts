@@ -24,7 +24,8 @@ const PALAVRAS_AVARIA = ["avaria", "danific"];
 const STATUS_ENTREGUE = new Set(["entregue", "assinado", "signed", "delivered"]);
 const FAIXAS: Faixa[] = ["0-1 dia", "2-3 dias", "4+ dias"];
 const LIMIAR_RUIDO_PADRAO = 3, MIN_URBANO = 3, LIMITE_TENTATIVAS = 3;
-const SEM_ENTREGADOR = "(sem entregador)";
+const SEM_ENTREGADOR = "(sem entregador)", SEM_CIDADE = "(sem cidade)";
+const CLASSES_PROGRESSO = ["Entregue", "Anormal", "Tratada", "Pendente"];
 const COLUNAS_CONTRATO = [
   "Waybill No", "Reference No", "Last Scan Status", "Last Problem Type", "Last Problem Reason", "Last Problem Date",
   "Consignee City", "Consignee Area", "Consignee Address", "Consignee Zip Code", "Delivery Associate", "Delivery Count",
@@ -452,28 +453,36 @@ const ehInsucesso = (r: Dados) => temValor(r[PROB]) && (contagem(r) ?? 0) < LIMI
 function desempenhoLocal(baseF: Dados[], ultF: Dados[], dias: string[]): Desempenho {
   const b = filtrarDias(baseF, dias), u = filtrarDias(ultF, dias);
   const noUlt = new Map(u.map((r) => [r[AWB] as string, r]));
-  const grupos = new Map<string, Dados[]>();
-  for (const r of b) { const e = ehNulo(r[ENTREG]) ? SEM_ENTREGADOR : String(r[ENTREG]); if (!grupos.has(e)) grupos.set(e, []); grupos.get(e)!.push(r); }
-  const linhas: LinhaDesempenho[] = []; const awbs: Desempenho["awbs"] = {};
-  for (const [e, g] of [...grupos].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
+  // Classe de cada peça da base (espelha metricas.classes_progresso): JaEntregue, Entregue, Anormal, Tratada, Pendente ou Saiu.
+  const classeDe = (r: Dados): string => {
+    if (entregaConfirmada(r)) return "JaEntregue";
+    const nu = noUlt.get(r[AWB] as string);
+    if (nu) return entregaConfirmada(nu) ? "Entregue" : temValor(nu[PROB]) ? (reroteada(nu) ? "Tratada" : "Anormal") : "Pendente";
+    return categoriaSaida(r) === "provavel_entrega" ? "Entregue" : "Saiu";
+  };
+  // Soma uma linha de desempenho a partir das peças de um grupo (a mesma conta por entregador e por cidade × entregador).
+  const resumir = (g: { r: Dados; c: string }[]) => {
+    const n = (c: string) => g.filter((x) => x.c === c).length;
+    const ja = n("JaEntregue"), total = g.length - ja, entregue = n("Entregue");
+    return { total, entregue, anormal: n("Anormal"), tratada: n("Tratada"), pendente: n("Pendente"), pct_entregue: total ? Math.round((1000 * entregue) / total) / 10 : 0, ja_entregues: ja };
+  };
+  const porClasse = (g: { r: Dados; c: string }[]) => {
     const cls: Record<string, string[]> = {};
-    let ent = 0, an = 0, tr = 0, pe = 0, ja = 0;
-    const marca = (classe: string, a: string) => { (cls[classe] ||= []).push(a); };
-    for (const r of g) {
-      const a = r[AWB] as string;
-      if (entregaConfirmada(r)) { ja++; continue; }
-      const nu = noUlt.get(a);
-      if (nu) {
-        if (entregaConfirmada(nu)) { ent++; marca("Entregue", a); }
-        else if (temValor(nu[PROB])) { if (reroteada(nu)) { tr++; marca("Tratada", a); } else { an++; marca("Anormal", a); } }
-        else { pe++; marca("Pendente", a); }
-      } else if (categoriaSaida(r) === "provavel_entrega") { ent++; marca("Entregue", a); }
-    }
-    const total = g.length - ja;
-    linhas.push({ entregador: e, total, entregue: ent, anormal: an, tratada: tr, pendente: pe, pct_entregue: total ? Math.round((1000 * ent) / total) / 10 : 0, ja_entregues: ja });
-    awbs[e] = cls;
-  }
-  return { dias: [...dias], linhas, awbs };
+    for (const x of g) if (CLASSES_PROGRESSO.includes(x.c)) (cls[x.c] ||= []).push(x.r[AWB] as string);
+    return cls;
+  };
+  const pecas = b.map((r) => ({ r, c: classeDe(r) }));
+  const entDe = (r: Dados) => (ehNulo(r[ENTREG]) ? SEM_ENTREGADOR : String(r[ENTREG]));
+  const cidDe = (r: Dados) => (ehNulo(r[CIDADE]) ? SEM_CIDADE : String(r[CIDADE]));
+  const agrupar = (chave: (r: Dados) => string[]) => {
+    const m = new Map<string, { chave: string[]; g: { r: Dados; c: string }[] }>();
+    for (const p of pecas) { const k = chave(p.r); const id = k.join("\u0000"); if (!m.has(id)) m.set(id, { chave: k, g: [] }); m.get(id)!.g.push(p); }
+    return [...m.values()].sort((x, y) => { for (let i = 0; i < x.chave.length; i++) if (x.chave[i] !== y.chave[i]) return x.chave[i] < y.chave[i] ? -1 : 1; return 0; });
+  };
+  const linhas: LinhaDesempenho[] = []; const awbs: Desempenho["awbs"] = {};
+  for (const { chave: [e], g } of agrupar((r) => [entDe(r)])) { linhas.push({ entregador: e, ...resumir(g) }); awbs[e] = porClasse(g); }
+  const por_cidade: LinhaDesempenhoCidade[] = agrupar((r) => [cidDe(r), entDe(r)]).map(({ chave: [cidade, e], g }) => ({ cidade, entregador: e, ...resumir(g), awbs: porClasse(g) }));
+  return { dias: [...dias], linhas, awbs, por_cidade };
 }
 
 // ---------- validação de arquivo (passo 2) ----------

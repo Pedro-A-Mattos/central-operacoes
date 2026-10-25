@@ -63,6 +63,10 @@ for (const cenario of ref.cenarios) {
   igual(t + " desempenho", ord(L.desempenho), ord(P.desempenho));
   const awbsOrd = (d) => Object.fromEntries(Object.entries(d.awbs).sort().map(([k, v]) => [k, Object.fromEntries(Object.entries(v).sort().map(([c, l]) => [c, [...l].sort()]))]));
   igual(t + " desempenho.awbs", awbsOrd(L.desempenho), awbsOrd(P.desempenho));
+  // Desempenho por cidade × entregador: números e AWBs por classe iguais nos dois motores.
+  const cidOrd = (d) => d.por_cidade.map((l) => ({ ...l, awbs: Object.fromEntries(Object.entries(l.awbs).sort().map(([c, a]) => [c, [...a].sort()])) }))
+    .sort((a, b) => (a.cidade + "\u0000" + a.entregador < b.cidade + "\u0000" + b.entregador ? -1 : 1));
+  igual(t + " desempenho.por_cidade", cidOrd(L.desempenho), cidOrd(P.desempenho));
 }
 
 // Paridade do Modo Estudo/Validação por região (CEP)

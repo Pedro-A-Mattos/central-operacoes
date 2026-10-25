@@ -214,3 +214,30 @@ Corrigido sem mexer na definição de `insucesso` (mantém os totais dos critér
 - **Piso "antes do carregamento":** 84 de 92 alertas do exemplo já têm saída para entrega registrada. Falta saber se o
   Dispatch é gerado antes ou depois do carregamento.
 
+## 10. Ajustes pedidos pela operação (24/10/2026)
+
+Origem: uso real da torre de controle e das telas de pendência. Tudo abaixo vive só na interface, exceto o desempenho por cidade (motor Python e motor local, com paridade).
+
+### Conferência de piso
+- **Conferidas × lidas.** A tela mostra "N de M linhas do arquivo foram conferidas" e o funil de totais, que agora continua até as encomendas conferidas (descontando as cidades fora da conferência). Na amostra: 1.809 linhas, 1.435 conferidas; saíram 299 de força maior, 40 sem cidade, 18 descarregadas e 17 "não recebido". A conferência nunca avaliou essas peças: o funil só passou a mostrar isso.
+- **Endereço.** Coluna "Endereço" (com CEP) na tabela de correções; o bairro continua abaixo da cidade.
+
+### Pendentes por data de chegada (substitui as faixas 0-1 / 2-3 / 4+ dias na navegação)
+- Tabela dinâmica cidade × dia de chegada (Pendências e aba Pendentes de Pendências de entrega). Caixas "Detalhar por" abrem entregador, bairro e endereço, nessa ordem; caixas de data tiram um dia da soma; clicar num número lista as encomendas; exportação em .xlsx.
+- A idade de cada data é em **dias de calendário** até o dia da referência do relatório. Peça sem data de chegada vai para a coluna "Sem data".
+- As faixas seguem nos dois motores e na gaveta de alguns alertas, mas deixaram de ser o caminho de navegação.
+
+### Regra de pendência (aba "Pendentes")
+- É pendência: toda peça de **Unaí**, qualquer que seja a data de chegada; nas demais cidades, a peça que chegou **antes do dia da referência**.
+- Não é pendência: peça de outra cidade que chegou no dia da referência; entrega confirmada; peça com **tentativa de entrega no dia da referência** (ela aparece nas listas de tentativas). Sem data de chegada conta como pendência.
+- Substitui a regra antiga ("2 dias ou mais"). A gaveta da encomenda explica, em cada caso, por que ela conta ou não.
+- **A validar com a operação:** o dia da referência é o do relatório atualizado (não o dia de hoje); "tentativa no dia" usa `Last Problem Date` com `Delivery Count` ≥ 1.
+
+### 1 e 2 tentativas
+- As abas passam a listar **toda** peça com ocorrência e exatamente 1 (ou 2) tentativas, inclusive a que já saiu para rota de novo, marcada "Já em rota: acompanhar". Antes essa peça sumia das duas abas e ia só para "Já em rota", o que fazia o total do topo não bater com o que o operador via.
+- Só a que **não** saiu para rota entra nos alertas e no "pedem uma ação sua". "Já em rota" segue como aba própria.
+
+### Entregadores
+- Quantidade e percentual juntos ("126 de 270 · 46,7%").
+- Nova visão **por cidade e entregador**. O motor devolve `desempenho.por_cidade`: uma linha por (cidade, entregador), com os AWBs por classe. A cidade é a da peça **na base** (o universo do indicador). Somando as cidades de um entregador sai exatamente a linha dele (teste `test_desempenho_por_cidade_soma_igual_ao_por_entregador`; paridade `desempenho.por_cidade`).
+
