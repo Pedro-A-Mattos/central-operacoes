@@ -232,7 +232,11 @@ function telaExcecoes(): HTMLElement {
 
   return h("div", { class: "tela" },
     cabecalho({ area: "Agir agora", titulo: "Pendências de entrega", ajuda: "excecoes", pergunta: "O que preciso colocar em rota, cobrar ou devolver?",
-      resposta: h("p", null, h("strong", null, plural(precisamAcao, "encomenda pede", "encomendas pedem")), ` uma ação sua · ${plural(ativas.ja_em_rota.length, "já saiu", "já saíram")} para rota de novo · ${plural(just.length, "justificada", "justificadas")}.`) }),
+      resposta: h("div", null,
+        h("p", null, h("strong", null, plural(precisamAcao, "encomenda pede", "encomendas pedem")), ` uma ação sua · ${plural(ativas.ja_em_rota.length, "já saiu", "já saíram")} para rota de novo · ${plural(just.length, "justificada", "justificadas")}.`),
+        h("p", { class: "nota" }, "Aqui só entra o que pede ação. Para ver tudo o que falta entregar (",
+          `${fmtN(a.atual.length)}), abra `,
+          h("button", { type: "button", class: "link", on: { click: () => navegar("pendencias", { de: "excecoes" }) } }, "Pendências"), ".")) }),
     abas("exc", [
       { id: "atrasadas" as const, rotulo: "Pendentes", n: ativas.atrasadas.length, tom: "atencao" as Tom },
       { id: "tent1" as const, rotulo: "1 tentativa", n: ativas.tent1.length, tom: "atencao" as Tom },

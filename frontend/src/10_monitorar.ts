@@ -89,7 +89,11 @@ function telaPendencias(): HTMLElement {
 
   return h("div", { class: "tela" },
     cabecalho({ area: "Monitorar", titulo: "Pendências", ajuda: "pendente", pergunta: "Quantas encomendas faltam entregar, onde estão e há quanto tempo esperam?",
-      resposta: h("p", null, h("strong", null, plural(recorte.length, "encomenda pendente", "encomendas pendentes")), recorte.length !== a.atual.length ? ` no filtro atual (de ${fmtN(a.atual.length)})` : "", ` · tempo médio desde a chegada: ${fmtN(Math.round(media * 10) / 10)} dias, contado até ${fmtData(a.referencia_backlog)}.`) }),
+      resposta: h("div", null,
+        h("p", null, h("strong", null, plural(recorte.length, "encomenda pendente", "encomendas pendentes")), recorte.length !== a.atual.length ? ` no filtro atual (de ${fmtN(a.atual.length)})` : "", ` · tempo médio desde a chegada: ${fmtN(Math.round(media * 10) / 10)} dias, contado até ${fmtData(a.referencia_backlog)}.`),
+        h("p", { class: "nota" }, "Esta tela mostra tudo o que ainda falta entregar. Em ",
+          h("button", { type: "button", class: "link", on: { click: () => navegar("excecoes", { de: "pendencias" }) } }, "Pendências de entrega"),
+          `, só o que pede uma ação sua agora (${fmtN(a.atual.filter(pendPrecisaAcao).length)}).`)) }),
     funilTotais(a, true, "pendentes", "pendencias"), // aberto: o operador compara esta tela com a planilha dele e precisa ver por que o total é menor (filtros padrão)
     barraFiltros(controles, ativos, limparTudo, "Estes filtros valem só nesta tela."),
     temDados ? [
