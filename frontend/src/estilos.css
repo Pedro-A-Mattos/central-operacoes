@@ -209,6 +209,14 @@ main { display: block; }
 .funil { background: var(--sup); border: 1px solid var(--linha); border-radius: var(--r-3); padding: var(--e-3) var(--e-4); }
 .funil > summary { display: flex; align-items: center; justify-content: space-between; gap: var(--e-3); cursor: pointer; font-size: 14px; }
 .funil-resumo { color: var(--tinta-3); font-variant-numeric: tabular-nums; font-size: 13px; }
+/* resumo em uma linha: título e "ver detalhes" em cima, a conta embaixo; com o funil aberto a lista já mostra a conta */
+.funil-eq-modo > summary { flex-wrap: wrap; align-items: baseline; row-gap: 4px; }
+.funil-eq-modo > summary::after { content: "Ver detalhes ▾"; order: 2; margin-left: auto; color: var(--acento-forte); font-size: 12px; }
+.funil-eq-modo[open] > summary::after { content: "Ocultar ▴"; }
+.funil-eq { order: 3; flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+.funil-eq b { color: var(--tinta); font-size: 15px; font-weight: 600; }
+.funil-eq-op { color: var(--tinta-3); }
+.funil[open] .funil-eq { display: none; }
 .funil-lista { list-style: none; margin: var(--e-3) 0 0; padding: 0; display: grid; gap: 2px; }
 .funil-linha { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: var(--e-2); align-items: baseline; padding: 5px 0; border-top: 1px solid var(--linha); font-size: 14px; }
 .funil-linha:first-child { border-top: 0; }

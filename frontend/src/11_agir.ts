@@ -56,7 +56,7 @@ function telaPiso(): HTMLElement {
           ? h("p", null, `Usando o mapa de região (CEP) ${E.mapaRegiaoOrigem === "sessao" ? "carregado nesta sessão pelo Estudo de regiões" : "publicado como padrão"}: cada encomenda é conferida pelo CEP (com retorno para bairro e cidade quando o CEP não tem regra). Um entregador fora do conjunto aparece como “Entregador fora da área”. ${textoProveniencia(E.mapaRegiaoAtivo)}`)
           : h("p", null, `As regras de quem entrega onde são aprendidas do relatório base: um entregador vale para uma cidade (ou bairro, nas cidades com ${a.parametros.min_entregadores_urbano} ou mais entregadores) quando tem pelo menos ${a.parametros.limiar_ruido} encomendas lá; o entregador com mais encomendas sempre vale. ${ajustadas ? `${plural(ajustadas, "cidade tem", "cidades têm")} ajuste manual, que tem prioridade.` : "Nenhuma cidade tem ajuste manual."}`),
         h("p", { class: "nota" }, E.mapaRegiaoAtivo ? "Para trocar o mapa, gere um novo no Estudo de regiões e clique em “Gerar e usar este mapa”." : "Uma regra derivada repete o histórico, inclusive erros recorrentes. Confirme antes de corrigir.", a.regras.cidades_ignoradas.length ? ` Cidades fora da conferência: ${a.regras.cidades_ignoradas.join(", ")}.` : ""))),
-    funilTotais(a, false, "piso", "piso"),
+    funilTotais(a, { aberto: false, ate: "piso", id: "piso", resumo: "equacao" }),
     todos.length ? [
       barraFiltros([
         multi({ id: "pi-tipo", rotulo: "Problema", opcoes: porTipo.map((t) => t.rotulo), valores: f.tipos, onMudar: (v) => set(() => { f.tipos = v; }) }),

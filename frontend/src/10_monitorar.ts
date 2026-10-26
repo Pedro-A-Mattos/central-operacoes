@@ -94,9 +94,10 @@ function telaPendencias(): HTMLElement {
         h("p", { class: "nota" }, "Esta tela mostra tudo o que ainda falta entregar. Em ",
           h("button", { type: "button", class: "link", on: { click: () => navegar("excecoes", { de: "pendencias" }) } }, "Pendências de entrega"),
           `, só o que pede uma ação sua agora (${fmtN(a.atual.filter(pendPrecisaAcao).length)}).`)) }),
-    funilTotais(a, true, "pendentes", "pendencias"), // aberto: o operador compara esta tela com a planilha dele e precisa ver por que o total é menor (filtros padrão)
+    funilTotais(a, { aberto: false, id: "pendencias", resumo: "equacao" }), // a conta vem numa linha: o operador compara esta tela com a planilha dele e vê por que o total é menor
     barraFiltros(controles, ativos, limparTudo, "Estes filtros valem só nesta tela."),
     temDados ? [
+      pivotChegada({ regs: recorteBruto, referencia: a.referencia_backlog, set, est: pv }),
       h("div", { class: "kpis kpis-6" },
         kpi({ rotulo: "Pendentes", ajuda: "pendente", valor: k.pend, nota: "No filtro atual" }),
         kpi({ rotulo: "Cidades", valor: k.cidades, nota: "Com pendências" }),
@@ -104,7 +105,6 @@ function telaPendencias(): HTMLElement {
         kpi({ rotulo: "Ocorrência vigente", ajuda: "com_ocorrencia", valor: k.vigente, tom: k.vigente ? "atencao" : undefined, nota: "Problema registrado e nenhuma saída para rota depois dele" }),
         kpi({ rotulo: "Já em rota após ocorrência", ajuda: "ocorrencia_tratada", valor: k.tratada, nota: "A saída para entrega é posterior ao problema" }),
         kpi({ rotulo: "Tempo médio", ajuda: "tempo_medio", valor: fmtN(Math.round(media * 10) / 10) + " dias", nota: "Desde a chegada ao galpão" })),
-      pivotChegada({ regs: recorteBruto, referencia: a.referencia_backlog, set, est: pv }),
       h("div", { class: "graficos g2" },
         barras({ id: "p-g-cid", ajuda: "por_cidade", titulo: "Por cidade", descricao: "Clique numa barra para filtrar a lista abaixo.", unidade: ["encomenda", "encomendas"], itens: contar(recorte, (r) => r.dados["Consignee City"] as string), selecionado: selDe("cidade"), onSelecionar: selecionar("cidade", "Cidade") }),
         barras({ id: "p-g-ent", ajuda: "por_entregador", titulo: "Por entregador", descricao: "Os 15 com mais pendências.", unidade: ["encomenda", "encomendas"], itens: contar(recorte, (r) => entregadorDe(r.dados)).slice(0, 15), selecionado: selDe("entregador"), onSelecionar: selecionar("entregador", "Entregador"), max: 8 }),

@@ -62,7 +62,7 @@ function telaTorre(): HTMLElement {
     h("h2", { id: "pend-tit", class: "sr" }, "Encomendas pendentes"),
     kpi({ id: "kpi-pendentes", rotulo: "Pendentes", ajuda: "pendente", valor: a.resumo.pendentes, nota: "Encomendas no relatório atualizado, depois dos filtros ao lado",
       destino: () => navegar("pendencias", { de: "torre", prep: () => { E.f.pendencias = filtrosVazios().pendencias; } }) }),
-    funilTotais(a, true, "pendentes", "torre"));
+    funilTotais(a, { id: "torre" }));
 
   const irPend = (prep: (f: FiltrosPend) => void) => navegar("pendencias", { de: "torre", prep: () => { const f = filtrosVazios().pendencias; prep(f); E.f.pendencias = f; } });
   const refDia = a.referencia_backlog.slice(0, 10);
@@ -110,7 +110,10 @@ function telaTorre(): HTMLElement {
 // Aberto ou fechado: o padrão de cada tela vale até o usuário mexer; depois a escolha dele fica (a tela é redesenhada a cada clique,
 // e sem lembrar o funil voltaria sozinho ao padrão). `id` identifica a tela.
 const FUNIL_ABERTO = new Map<string, boolean>();
-function funilTotais(a: Analise, aberto = true, ate: "pendentes" | "piso" = "pendentes", id: string = ate): HTMLElement {
+// `resumo`: "curto" mostra só "1.809 → 1.435"; "equacao" mostra a conta inteira numa linha, visível mesmo com o funil fechado
+// (as retiradas que valem zero não entram), para o operador ver por que o total é menor que o da planilha sem abrir nada.
+function funilTotais(a: Analise, o: { aberto?: boolean; ate?: "pendentes" | "piso"; id?: string; resumo?: "curto" | "equacao" } = {}): HTMLElement {
+  const aberto = o.aberto ?? true, ate = o.ate ?? "pendentes", id = o.id ?? ate, resumo = o.resumo ?? "curto";
   const e = a.etapas, par = a.parametros;
   type Passo = { rotulo: string; n: number; nota: string; ir?: () => void };
   const retiradas: Passo[] = [];
@@ -133,8 +136,13 @@ function funilTotais(a: Analise, aberto = true, ate: "pendentes" | "piso" = "pen
     retiradas.push({ rotulo: "Cidades fora da conferência", n: nIgn, nota: ign.size ? `Cidades marcadas para não conferir: ${[...ign].join(", ")}` : "Nenhuma cidade marcada para ficar de fora" });
     total -= nIgn; rotuloTotal = "Encomendas conferidas no piso";
   }
-  return h("details", { class: "funil", open: FUNIL_ABERTO.get(id) ?? aberto, on: { toggle: (e: Event) => { FUNIL_ABERTO.set(id, (e.target as HTMLDetailsElement).open); } } },
-    h("summary", null, h("strong", null, "Como chegamos a este número"), h("span", { class: "funil-resumo" }, `${fmtN(linhasArquivo)} → ${fmtN(total)}`)),
+  const item = (n: number, rot: string) => h("span", { class: "funil-eq-item" }, h("b", null, fmtN(n)), " " + rot);
+  const op = (sinal: string, leitura: string) => h("span", { class: "funil-eq-op" }, h("span", { "aria-hidden": "true" }, sinal), h("span", { class: "sr" }, ` ${leitura} `));
+  const equacao = resumo === "equacao" ? h("span", { class: "funil-eq" }, item(linhasArquivo, "linhas"),
+    retiradas.filter((r) => r.n > 0).map((r) => [op("−", "menos"), item(r.n, r.rotulo.toLowerCase())]),
+    op("=", "igual a"), item(total, ate === "piso" ? "conferidas" : "pendentes")) : null;
+  return h("details", { class: "funil" + (equacao ? " funil-eq-modo" : ""), open: FUNIL_ABERTO.get(id) ?? aberto, on: { toggle: (e: Event) => { FUNIL_ABERTO.set(id, (e.target as HTMLDetailsElement).open); } } },
+    h("summary", null, h("strong", null, "Como chegamos a este número"), equacao || h("span", { class: "funil-resumo" }, `${fmtN(linhasArquivo)} → ${fmtN(total)}`)),
     h("ol", { class: "funil-lista", "aria-label": "Conferência de totais do relatório atualizado" },
       h("li", { class: "funil-linha" }, h("span", { class: "funil-sinal", "aria-hidden": "true" }), h("span", { class: "funil-rot" }, arq ? "Linhas no arquivo atualizado" : "Códigos únicos no relatório atualizado"), h("strong", null, fmtN(linhasArquivo))),
       retiradas.map((r) => h("li", { class: "funil-linha" + (r.n ? "" : " zero") },
