@@ -90,8 +90,8 @@ const rotuloIdade = (n: number | null) => (n === null ? "sem data" : n < 0 ? "ap
 const tomIdade = (n: number | null): Tom => (n === null || n < 2 ? "neutro" : n < 4 ? "atencao" : "critico");
 
 // `regs` é o recorte ANTES de excluir datas (as caixas de data precisam mostrar também as excluídas).
-function pivotChegada(o: { regs: RegAtual[]; referencia: string; set: (fn: () => void) => void }): HTMLElement {
-  const est = E.f.pivot;
+function pivotChegada(o: { regs: RegAtual[]; referencia: string; set: (fn: () => void) => void; est: EstadoPivot }): HTMLElement {
+  const est = o.est;
   const fora = new Set(est.datasFora);
   const dias = diasDoRecorte(o.regs);
   const arv = montarPivot(o.regs, est.dims, fora);

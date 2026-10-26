@@ -3,7 +3,7 @@
 
 type Tela = "importar" | "torre" | "piso" | "excecoes" | "pendencias" | "entregadores" | "historico" | "mapa" | "a-entregar" | "mudancas" | "fora" | "regras" | "criterios" | "nao-recebido" | "estudo";
 
-interface SelecaoGrafico { dim: "cidade" | "entregador" | "faixa" | "problema" | "classe" | "rota"; valor: string; rotulo: string }
+interface SelecaoGrafico { dim: "cidade" | "entregador" | "problema" | "classe" | "rota"; valor: string; rotulo: string }
 
 interface FiltrosPend { ocorrencia: "" | "vigente" | "tratada"; cidades: string[]; bairros: string[]; classes: string[]; faixas: string[]; rota: string[]; dias: string[]; soProblema: boolean; semEntregador: boolean; sel: SelecaoGrafico | null }
 interface FiltrosPiso { tipos: string[]; cidades: string[]; bairros: string[]; entregadores: string[]; vista?: "tabela" | "roteiro" }
@@ -16,9 +16,11 @@ type RefAwb =
   | { fonte: "saiu"; reg: RegSaiu }
   | { fonte: "fora_atual" | "fora_base"; dados: Dados };
 
+const pivotVazio = (): EstadoPivot => ({ dims: ["cidade"], datasFora: [], fechados: [], cel: null });
 const filtrosVazios = () => ({
   pendencias: { ocorrencia: "", cidades: [], bairros: [], classes: [], faixas: [], rota: [], dias: [], soProblema: false, semEntregador: false, sel: null } as FiltrosPend,
-  pivot: { dims: ["cidade"], datasFora: [], fechados: [], cel: null } as EstadoPivot,
+  pivot: pivotVazio(),         // tabela dinâmica da tela Pendências
+  pivotEntrega: pivotVazio(),  // a da aba Pendentes de Pendências de entrega: estado próprio, para uma tela não mexer na outra
   piso: { tipos: [], cidades: [], bairros: [], entregadores: [] } as FiltrosPiso,
   excecoes: { aba: "atrasadas", cidades: [], bairros: [], entregadores: [] } as FiltrosExc,
   entregadores: { dias: [], ordem: "total", agrupar: "entregador", sel: null, realce: null } as FiltrosEnt,
@@ -80,7 +82,14 @@ function navegar(tela: Tela, opts: { prep?: () => void; de?: Tela } = {}) {
   atualizar(() => {
     if (opts.de) E.origem = { tela: opts.de, rotulo: TITULOS[opts.de] }; else E.origem = null;
     E.tela = tela; E.menuAberto = false; AJUDA.aberta = "";
-    if (opts.prep) opts.prep();
+    if (opts.prep) {
+      // Atalho vindo de outra tela (gráfico, alerta ou indicador): a tabela dinâmica de destino começa sem datas tiradas nem célula
+      // selecionada. Senão o filtro de uma visita anterior continua valendo e o número não bate com o que foi clicado.
+      // O desenho (dims, linhas recolhidas) é escolha do usuário e fica.
+      const pv = tela === "pendencias" ? E.f.pivot : tela === "excecoes" ? E.f.pivotEntrega : null;
+      if (pv) { pv.datasFora = []; pv.cel = null; }
+      opts.prep();
+    }
   });
   try { history.replaceState(null, "", "#" + tela); } catch { /* sem histórico */ }
   const main = document.getElementById("conteudo"); if (main) main.scrollTop = 0;

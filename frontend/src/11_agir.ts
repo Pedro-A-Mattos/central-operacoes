@@ -195,7 +195,7 @@ function telaExcecoes(): HTMLElement {
   const base = f.aba === "justificados" ? just : ativas[f.aba];
   const filtrada = base.filter((r) => (!f.cidades.length || f.cidades.includes(String(r.dados["Consignee City"]))) && (!f.bairros.length || f.bairros.includes(String(r.dados["Consignee Area"]))) && (!f.entregadores.length || f.entregadores.includes(entregadorDe(r.dados))));
   // Na aba de pendentes, a tabela dinâmica por data de chegada também filtra a lista (datas tiradas da soma e célula clicada).
-  const comPivot = f.aba === "atrasadas"; const pv = E.f.pivot; const datasFora = new Set(pv.datasFora);
+  const comPivot = f.aba === "atrasadas"; const pv = E.f.pivotEntrega; const datasFora = new Set(pv.datasFora);
   const lista = comPivot ? filtrada.filter((r) => !datasFora.has(diaChegada(r)) && casaCelulaPivot(r, pv.cel, pv.dims)) : filtrada;
   const precisamAcao = a.atual.filter(pendPrecisaAcao).length;
   const g = (r: RegAtual) => r.dados;
@@ -242,7 +242,7 @@ function telaExcecoes(): HTMLElement {
       { id: "avaria" as const, rotulo: "Avarias", n: ativas.avaria.length, tom: "critico" as Tom },
       { id: "ja_em_rota" as const, rotulo: "Já em rota", n: ativas.ja_em_rota.length },
       { id: "justificados" as const, rotulo: "Justificados", n: just.length },
-    ], f.aba, (v) => set(() => { f.aba = v; MARCADOS_EXC.clear(); E.f.pivot.cel = null; })),
+    ], f.aba, (v) => set(() => { f.aba = v; MARCADOS_EXC.clear(); E.f.pivotEntrega.cel = null; })),
     h("p", { class: "regra" }, explica(f.aba, "aba"), f.aba === "justificados"
       ? ["Alertas silenciados com motivo. Reative para que voltem às listas ativas.", outrasJust ? ` Há ${plural(outrasJust, "outra justificativa guardada", "outras justificativas guardadas")} para encomendas que não estão em alerta nesta análise.` : ""]
       : REGRA_PEND[f.aba]),
@@ -256,7 +256,7 @@ function telaExcecoes(): HTMLElement {
         ...(comPivot ? [...pv.datasFora.map((d) => ({ texto: "Sem a chegada de " + (d === SEM_DATA ? "(sem data)" : fmtDia(d)), remover: () => set(() => { pv.datasFora = pv.datasFora.filter((x) => x !== d); pv.cel = null; }) })),
           ...(pv.cel ? [{ texto: "Tabela · " + rotuloCelulaPivot(pv.cel), remover: () => set(() => { pv.cel = null; }) }] : [])] : [])],
       () => set(() => { f.cidades = []; f.bairros = []; f.entregadores = []; pv.datasFora = []; pv.cel = null; })) : null,
-    comPivot && filtrada.length ? pivotChegada({ regs: filtrada, referencia: a.referencia_backlog, set }) : null,
+    comPivot && filtrada.length ? pivotChegada({ regs: filtrada, referencia: a.referencia_backlog, set, est: pv }) : null,
     base.length
       ? tabela({ id: "exc", titulo: "Pendências de entrega", linhas: lista, chave: (r) => awbDe(r.dados), onAbrir: (r) => abrirAwb(awbDe(r.dados), f.aba !== "justificados" ? "justificar" : ""),
           ordemInicial: aba === "atrasadas" ? { col: "dias", dir: -1 } : undefined,
