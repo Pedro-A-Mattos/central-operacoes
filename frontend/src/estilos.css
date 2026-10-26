@@ -747,7 +747,16 @@ button.rl { cursor: pointer; } button.rl:hover { background: var(--sup-2); }
 .pv-th.tom-atencao { box-shadow: inset 0 -3px 0 var(--atencao-barra); }
 .pv-th.tom-critico { box-shadow: inset 0 -3px 0 var(--critico); }
 .pv-tabela td.num, .pv-tabela th.num { font-variant-numeric: tabular-nums; }
-.pv-tabela th[scope="row"] { text-align: left; font-weight: 500; color: var(--tinta); background: none; position: static; white-space: normal; border-top: 1px solid var(--linha); }
+/* primeira coluna fixa: com muitas datas a tabela rola para o lado e o nome da linha continua à vista */
+.pv-tabela th[scope="row"] { text-align: left; font-weight: 500; color: var(--tinta); background: var(--sup); position: sticky; left: 0; z-index: 1; white-space: normal; border-top: 1px solid var(--linha); }
+.pv-tabela th.pv-th-rot { position: sticky; left: 0; z-index: 2; }
+.pv-geral th[scope="row"] { background: var(--sup-2); }
+.pv-tabela th.pv-th, .pv-tabela th.pv-th-rot { padding: 0; }
+.pv-ord { flex-direction: column; align-items: flex-end; gap: 0; }
+.pv-th-rot .ord { justify-content: flex-start; }
+.pv-th .ord:hover, .pv-th-rot .ord:hover { color: var(--acento-forte); }
+/* números maiores com o fundo mais forte (--calor de 0 a 1, relativo ao maior do mesmo nível) */
+.pv-calor { background: color-mix(in srgb, var(--acento) calc(var(--calor, 0) * 24%), transparent); }
 .pv-nivel-0 th[scope="row"] { font-weight: 600; }
 .pv-tabela td { border-top: 1px solid var(--linha); }
 .pv-total { font-weight: 600; background: var(--sup-2); }

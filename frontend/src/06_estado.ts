@@ -16,7 +16,7 @@ type RefAwb =
   | { fonte: "saiu"; reg: RegSaiu }
   | { fonte: "fora_atual" | "fora_base"; dados: Dados };
 
-const pivotVazio = (): EstadoPivot => ({ dims: ["cidade"], datasFora: [], fechados: [], cel: null });
+const pivotVazio = (): EstadoPivot => ({ dims: ["cidade"], datasFora: [], fechados: [], cel: null, ordem: "nome" });
 const filtrosVazios = () => ({
   pendencias: { ocorrencia: "", cidades: [], bairros: [], classes: [], rota: [], dias: [], soProblema: false, semEntregador: false, sel: null } as FiltrosPend,
   pivot: pivotVazio(),         // tabela dinâmica da tela Pendências

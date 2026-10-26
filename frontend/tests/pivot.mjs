@@ -70,5 +70,17 @@ ok(mod.idadeEmDias("2026-10-22", "2026-10-21") === -1, "chegou depois da referê
 igual([mod.tomIdade(0), mod.tomIdade(1), mod.tomIdade(2), mod.tomIdade(3), mod.tomIdade(4), mod.tomIdade(null)], ["neutro", "neutro", "atencao", "atencao", "critico", "neutro"], "tons");
 igual([mod.rotuloIdade(0), mod.rotuloIdade(1), mod.rotuloIdade(5), mod.rotuloIdade(null)], ["no dia", "há 1 dia", "há 5 dias", "sem data"], "rótulos de idade");
 
+// 8) ordem das linhas: nome (padrão, como no Excel), total ou o dia de uma coluna; empate: mais peças no total e depois o nome
+const nomes = (t) => t.raiz.filhos.map((n) => n.rotulo);
+igual(nomes(mod.montarPivot(regs, ["cidade"])), ["Buritis", "Formoso", "Unaí"], "ordem padrão é pelo nome");
+igual(nomes(mod.montarPivot(regs, ["cidade"], new Set(), "total")), ["Buritis", "Unaí", "Formoso"], "por total: Buritis e Unaí empatam em 3 (vale o nome); Formoso tem 1");
+igual(nomes(mod.montarPivot(regs, ["cidade"], new Set(), "2026-10-19")), ["Buritis", "Unaí", "Formoso"], "por 19/10: Buritis tem 2; as outras zero e desempatam pelo total");
+igual(nomes(mod.montarPivot(regs, ["cidade"], new Set(), "2026-10-17")), ["Unaí", "Buritis", "Formoso"], "por 17/10: Unaí tem 2, Buritis 1");
+igual(nomes(mod.montarPivot(regs, ["cidade"], new Set(), "2030-01-01")), ["Buritis", "Unaí", "Formoso"], "data que não existe (ou foi tirada) cai no total");
+t = mod.montarPivot(regs, ["cidade", "entregador"], new Set(), "total");
+igual(t.raiz.filhos.find((n) => n.rotulo === "Buritis").filhos.map((n) => n.rotulo), ["Caio", "(sem entregador)"], "a ordem vale em todos os níveis");
+igual(mod.folhasPivot(t.raiz, 2).map((n) => n.caminho.join(" / ")), ["Buritis / Caio", "Buritis / (sem entregador)", "Unaí / Ana", "Unaí / Bia", "Formoso / Dani"], "o Excel exportado segue a ordem escolhida");
+igual(mod.montarPivot(regs, ["cidade"], new Set(), "total").raiz.total, regs.length, "ordenar não muda nenhum número");
+
 if (falhas) { console.error(`${falhas} falha(s)`); process.exit(1); }
 console.log("ok   tabela dinâmica: soma, hierarquia, exclusão de datas, célula e idade");

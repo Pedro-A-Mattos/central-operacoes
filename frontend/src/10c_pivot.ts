@@ -3,7 +3,8 @@
 // A conta (`montarPivot`) é pura e fica separada do desenho para ser testada sem DOM.
 
 type DimPivot = "cidade" | "entregador" | "bairro" | "endereco";
-interface EstadoPivot { dims: DimPivot[]; datasFora: string[]; fechados: string[]; cel: { caminho: string[]; data: string | null } | null }
+// `ordem`: "nome" (alfabética, como no Excel), "total" (mais peças primeiro) ou o dia de uma coluna (aaaa-mm-dd: mais peças naquele dia primeiro).
+interface EstadoPivot { dims: DimPivot[]; datasFora: string[]; fechados: string[]; cel: { caminho: string[]; data: string | null } | null; ordem: string }
 
 const SEM_DATA = "sem-data";
 const SEP_PIVOT = "\u0000";
@@ -37,7 +38,7 @@ function noVazio(caminho: string[], nivel: number): NoPivot {
   return { caminho, rotulo: caminho.length ? caminho[caminho.length - 1] : "Total Geral", nivel, total: 0, porData: new Map(), filhos: [] };
 }
 
-function montarPivot(regs: RegAtual[], dims: DimPivot[], datasFora: Set<string> = new Set()): ArvorePivot {
+function montarPivot(regs: RegAtual[], dims: DimPivot[], datasFora: Set<string> = new Set(), ordem = "nome"): ArvorePivot {
   const raiz = noVazio([], -1);
   const nos = new Map<string, NoPivot>();
   const datas = new Set<string>();
@@ -57,7 +58,10 @@ function montarPivot(regs: RegAtual[], dims: DimPivot[], datasFora: Set<string> 
       soma(no); pai = no;
     });
   }
-  const ordenar = (n: NoPivot) => { n.filhos.sort((a, b) => a.rotulo.localeCompare(b.rotulo, "pt-BR")); n.filhos.forEach(ordenar); };
+  // Em cada nível, os filhos seguem a ordem escolhida; empate: mais peças no total e, por fim, o nome.
+  const peso = (n: NoPivot) => (ordem === "total" ? n.total : n.porData.get(ordem) || 0);
+  const porNome = (a: NoPivot, b: NoPivot) => a.rotulo.localeCompare(b.rotulo, "pt-BR");
+  const ordenar = (n: NoPivot) => { n.filhos.sort(ordem === "nome" ? porNome : (a, b) => peso(b) - peso(a) || b.total - a.total || porNome(a, b)); n.filhos.forEach(ordenar); };
   ordenar(raiz);
   return { datas: [...datas].sort(ordemDatas), raiz };
 }
@@ -95,7 +99,7 @@ function pivotChegada(o: { regs: RegAtual[]; referencia: string; set: (fn: () =>
   const est = o.est;
   const fora = new Set(est.datasFora);
   const dias = diasDoRecorte(o.regs);
-  const arv = montarPivot(o.regs, est.dims, fora);
+  const arv = montarPivot(o.regs, est.dims, fora, est.ordem);
   const ref = o.referencia.slice(0, 10);
   const colunas = arv.datas;
   const rotuloLinhas = est.dims.map((d) => dimPivot(d).rotulo).join(" › ");
@@ -126,16 +130,25 @@ function pivotChegada(o: { regs: RegAtual[]; referencia: string; set: (fn: () =>
   const visitar = (n: NoPivot) => { for (const f of n.filhos) { linhas.push(f); if (!fechados.has(chave(f))) visitar(f); } };
   visitar(arv.raiz);
 
+  const maiorDoNivel = new Map<number, number>();
+  for (const n of linhas) for (const d of colunas) maiorDoNivel.set(n.nivel, Math.max(maiorDoNivel.get(n.nivel) || 0, n.porData.get(d) || 0));
   const celula = (n: NoPivot, dia: string | null) => {
     const v = dia === null ? n.total : n.porData.get(dia) || 0;
     const cls = "num" + (dia === null ? " pv-total" : "");
     if (!v) return h("td", { class: cls + " pv-zero" }, "");
-    return h("td", { class: cls }, h("button", { type: "button", class: "pv-cel" + (celSel(n, dia) ? " sel" : ""), "aria-pressed": celSel(n, dia) ? "true" : "false",
+    const td = h("td", { class: cls + (dia === null ? "" : " pv-calor") }, h("button", { type: "button", class: "pv-cel" + (celSel(n, dia) ? " sel" : ""), "aria-pressed": celSel(n, dia) ? "true" : "false",
       title: `${rotuloCelulaPivot({ caminho: n.caminho, data: dia })}: ${plural(v, "encomenda", "encomendas")}. Clique para listar abaixo.`,
       on: { click: () => { const escolhendo = !celSel(n, dia); o.set(() => { est.cel = escolhendo ? { caminho: n.caminho, data: dia } : null; }); if (escolhendo && o.lista) irPara(o.lista); } } }, fmtN(v)));
+    if (dia !== null) td.style.setProperty("--calor", Math.sqrt(v / (maiorDoNivel.get(n.nivel) || v)).toFixed(2));
+    return td;
   };
 
-  const cabData = (dia: string) => { const idade = idadeEmDias(dia, ref); return h("th", { class: "num pv-th tom-" + tomIdade(idade), scope: "col" }, fmtDiaCurto(dia), h("small", null, rotuloIdade(idade))); };
+  const ordenarPor = (v: string) => () => o.set(() => { est.ordem = v; });
+  const seta = (v: string) => (est.ordem === v ? (v === "nome" ? " ▲" : " ▼") : "");
+  const ariaOrd = (v: string) => (est.ordem === v ? (v === "nome" ? "ascending" : "descending") : "none");
+  const cabData = (dia: string) => { const idade = idadeEmDias(dia, ref);
+    return h("th", { class: "num pv-th tom-" + tomIdade(idade), scope: "col", "aria-sort": ariaOrd(dia) },
+      h("button", { type: "button", class: "ord pv-ord", title: "Ordenar: mais peças desta data primeiro", on: { click: ordenarPor(dia) } }, h("span", null, fmtDiaCurto(dia) + seta(dia)), h("small", null, rotuloIdade(idade)))); };
   const corpo = linhas.map((n) => {
     const temFilhos = n.filhos.length > 0; const aberto = !fechados.has(chave(n));
     return h("tr", { class: "pv-nivel-" + n.nivel },
@@ -173,7 +186,10 @@ function pivotChegada(o: { regs: RegAtual[]; referencia: string; set: (fn: () =>
     colunas.length
       ? h("div", { class: "tabela-rolagem" }, h("table", { class: "pv-tabela" },
           h("caption", { class: "sr" }, `Pendentes por ${rotuloLinhas.toLowerCase()} e data de chegada`),
-          h("thead", null, h("tr", null, h("th", { scope: "col", class: "pv-th-rot" }, rotuloLinhas), colunas.map(cabData), h("th", { class: "num pv-th pv-total", scope: "col" }, "Total"))),
+          h("thead", null, h("tr", null,
+            h("th", { scope: "col", class: "pv-th-rot", "aria-sort": ariaOrd("nome") }, h("button", { type: "button", class: "ord", title: "Ordenar pelo nome", on: { click: ordenarPor("nome") } }, rotuloLinhas + seta("nome"))),
+            colunas.map(cabData),
+            h("th", { class: "num pv-th pv-total", scope: "col", "aria-sort": ariaOrd("total") }, h("button", { type: "button", class: "ord", title: "Ordenar: mais peças no total primeiro", on: { click: ordenarPor("total") } }, "Total" + seta("total"))))),
           h("tbody", null, corpo), h("tfoot", null, rodape)))
       : h("p", { class: "grafico-vazio" }, "Nenhuma data marcada: marque ao menos uma data de chegada."),
     h("p", { class: "nota" }, "Clique num número para listar essas encomendas abaixo. A data mostra há quantos dias a encomenda chegou, até ", fmtData(o.referencia), "."));
