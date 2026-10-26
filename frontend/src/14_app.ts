@@ -148,6 +148,7 @@ function render() {
   if (Math.abs(window.scrollY - yAntes) > 2) window.scrollTo(0, yAntes);
   posicionarAjuda();
   marcarDicas(raiz); // dicas ao passar o mouse nos rótulos que têm explicação no glossário
+  salvarPrefs();
 }
 
 // O balão da ajuda é fixo na tela, ancorado ao botão "?" (não é cortado por tabelas com rolagem).
@@ -164,6 +165,7 @@ function posicionarAjuda() {
 
 async function iniciar() {
   renderizar = render;
+  aplicarPrefs(); // desenho da tabela, ordem, cor do mapa e funil como o operador deixou na última visita
   instalarDicas();
   document.documentElement.lang = "pt-BR";
   document.addEventListener("keydown", (e) => {

@@ -141,7 +141,7 @@ function funilTotais(a: Analise, o: { aberto?: boolean; ate?: "pendentes" | "pis
   const equacao = resumo === "equacao" ? h("span", { class: "funil-eq" }, item(linhasArquivo, "linhas"),
     retiradas.filter((r) => r.n > 0).map((r) => [op("−", "menos"), item(r.n, r.rotulo.toLowerCase())]),
     op("=", "igual a"), item(total, ate === "piso" ? "conferidas" : "pendentes")) : null;
-  return h("details", { class: "funil" + (equacao ? " funil-eq-modo" : ""), open: FUNIL_ABERTO.get(id) ?? aberto, on: { toggle: (e: Event) => { FUNIL_ABERTO.set(id, (e.target as HTMLDetailsElement).open); } } },
+  return h("details", { class: "funil" + (equacao ? " funil-eq-modo" : ""), open: FUNIL_ABERTO.get(id) ?? aberto, on: { toggle: (e: Event) => { FUNIL_ABERTO.set(id, (e.target as HTMLDetailsElement).open); salvarPrefs(); } } },
     h("summary", null, h("strong", null, "Como chegamos a este número"), equacao || h("span", { class: "funil-resumo" }, `${fmtN(linhasArquivo)} → ${fmtN(total)}`)),
     h("ol", { class: "funil-lista", "aria-label": "Conferência de totais do relatório atualizado" },
       h("li", { class: "funil-linha" }, h("span", { class: "funil-sinal", "aria-hidden": "true" }), h("span", { class: "funil-rot" }, arq ? "Linhas no arquivo atualizado" : "Códigos únicos no relatório atualizado"), h("strong", null, fmtN(linhasArquivo))),

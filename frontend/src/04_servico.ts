@@ -107,7 +107,7 @@ interface Repositorio {
 const OV_VAZIO = (): Overrides => ({ por_cidade: {}, cidades_ignoradas: [] });
 
 // Modo efêmero (build --publico): nada é gravado em lugar nenhum. Tudo vive só
-// nesta aba e some ao fechar/recarregar. Sem localStorage, sem servidor, sem custo.
+// nesta aba e some ao fechar/recarregar. Sem localStorage para dados, sem servidor, sem custo (preferências de tela: 06d_prefs.ts).
 // `regrasBase` (opcional) são as regras de piso versionadas no GitHub, lidas ao abrir;
 // a aplicação só lê — nunca escreve de volta no repositório.
 function repoMemoria(regrasBase?: Overrides | null): Repositorio {

@@ -78,9 +78,11 @@ Decisões e o que mudou na auditoria de 13/10/2026: `docs/DECISOES_E_VALIDACAO.m
 
 `.github/workflows/pages.yml` publica **apenas a interface** no GitHub Pages a
 cada push na branch `main`. O build usa `node build.mjs --publico`, que liga o
-**modo efêmero**: sem backend, sem persistência e começando vazio — o usuário
-faz o upload dos dois relatórios a cada sessão e, ao fechar a aba, nada é
-guardado. É o modo sem custo de infraestrutura. Os dados reais e os artefatos
+**modo efêmero**: sem backend, sem persistência de dados e começando vazio — o usuário
+faz o upload dos dois relatórios a cada sessão e, ao fechar a aba, nenhum dado é
+guardado (só preferências de tela, como o desenho da tabela por data, ficam no
+navegador; há "Esquecer preferências" em Importação e critérios). É o modo sem
+custo de infraestrutura. Os dados reais e os artefatos
 de build (`frontend/dist/`, `backend/dados_exemplo/`, `backend/dados/`) ficam
 fora do repositório.
 

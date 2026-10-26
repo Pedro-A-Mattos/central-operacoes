@@ -78,7 +78,7 @@ async function processarPisoUnico() {
     atualizar(() => {
       E.analise = a; indexar(a); E.desempenho = a.desempenho;
       E.overrides = { por_cidade: {}, cidades_ignoradas: [] };
-      E.f = filtrosVazios(); E.pisoUnico = true; E.imp.processando = false;
+      { const lay = layoutAtual(); E.f = filtrosVazios(); restaurarLayout(lay); } E.pisoUnico = true; E.imp.processando = false;
     });
     E.servico!.obterRegras().then((ov) => atualizar(() => { E.overrides = ov; })).catch(() => {});
     navegar("piso");
@@ -101,7 +101,7 @@ async function processar(reprocessar = false) {
     atualizar(() => {
       E.analise = a; indexar(a); E.desempenho = a.desempenho;
       E.overrides = { por_cidade: {}, cidades_ignoradas: [] };
-      if (!reprocessar) E.f = filtrosVazios(); else { E.f = filtrosAntes; E.f.entregadores.dias = []; E.f.entregadores.sel = null; E.f.pendencias.dias = E.f.pendencias.dias.filter((d) => a.dias_chegada.includes(d)); }
+      if (!reprocessar) { const lay = layoutAtual(); E.f = filtrosVazios(); restaurarLayout(lay); } else { E.f = filtrosAntes; E.f.entregadores.dias = []; E.f.entregadores.sel = null; E.f.pendencias.dias = E.f.pendencias.dias.filter((d) => a.dias_chegada.includes(d)); }
       E.pisoUnico = false;
       E.imp.processando = false;
     });
