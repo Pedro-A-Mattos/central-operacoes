@@ -62,7 +62,7 @@ function telaTorre(): HTMLElement {
     h("h2", { id: "pend-tit", class: "sr" }, "Encomendas pendentes"),
     kpi({ id: "kpi-pendentes", rotulo: "Pendentes", ajuda: "pendente", valor: a.resumo.pendentes, nota: "Encomendas no relatório atualizado, depois dos filtros ao lado",
       destino: () => navegar("pendencias", { de: "torre", prep: () => { E.f.pendencias = filtrosVazios().pendencias; } }) }),
-    funilTotais(a));
+    funilTotais(a, true, "pendentes", "torre"));
 
   const irPend = (prep: (f: FiltrosPend) => void) => navegar("pendencias", { de: "torre", prep: () => { const f = filtrosVazios().pendencias; prep(f); E.f.pendencias = f; } });
   const refDia = a.referencia_backlog.slice(0, 10);
@@ -107,7 +107,10 @@ function telaTorre(): HTMLElement {
 // Usa só `etapas`, que os dois motores já devolvem, para o funil nunca divergir.
 // Com `ate = "piso"`, o funil continua até as encomendas realmente conferidas na Conferência de piso
 // (descontando as cidades fora da conferência), para o total bater com a tela.
-function funilTotais(a: Analise, aberto = true, ate: "pendentes" | "piso" = "pendentes"): HTMLElement {
+// Aberto ou fechado: o padrão de cada tela vale até o usuário mexer; depois a escolha dele fica (a tela é redesenhada a cada clique,
+// e sem lembrar o funil voltaria sozinho ao padrão). `id` identifica a tela.
+const FUNIL_ABERTO = new Map<string, boolean>();
+function funilTotais(a: Analise, aberto = true, ate: "pendentes" | "piso" = "pendentes", id: string = ate): HTMLElement {
   const e = a.etapas, par = a.parametros;
   type Passo = { rotulo: string; n: number; nota: string; ir?: () => void };
   const retiradas: Passo[] = [];
@@ -130,7 +133,7 @@ function funilTotais(a: Analise, aberto = true, ate: "pendentes" | "piso" = "pen
     retiradas.push({ rotulo: "Cidades fora da conferência", n: nIgn, nota: ign.size ? `Cidades marcadas para não conferir: ${[...ign].join(", ")}` : "Nenhuma cidade marcada para ficar de fora" });
     total -= nIgn; rotuloTotal = "Encomendas conferidas no piso";
   }
-  return h("details", { class: "funil", open: aberto },
+  return h("details", { class: "funil", open: FUNIL_ABERTO.get(id) ?? aberto, on: { toggle: (e: Event) => { FUNIL_ABERTO.set(id, (e.target as HTMLDetailsElement).open); } } },
     h("summary", null, h("strong", null, "Como chegamos a este número"), h("span", { class: "funil-resumo" }, `${fmtN(linhasArquivo)} → ${fmtN(total)}`)),
     h("ol", { class: "funil-lista", "aria-label": "Conferência de totais do relatório atualizado" },
       h("li", { class: "funil-linha" }, h("span", { class: "funil-sinal", "aria-hidden": "true" }), h("span", { class: "funil-rot" }, arq ? "Linhas no arquivo atualizado" : "Códigos únicos no relatório atualizado"), h("strong", null, fmtN(linhasArquivo))),

@@ -91,7 +91,7 @@ function telaPendencias(): HTMLElement {
   return h("div", { class: "tela" },
     cabecalho({ area: "Monitorar", titulo: "Pendências", ajuda: "pendente", pergunta: "Quantas encomendas faltam entregar, onde estão e há quanto tempo esperam?",
       resposta: h("p", null, h("strong", null, plural(recorte.length, "encomenda pendente", "encomendas pendentes")), recorte.length !== a.atual.length ? ` no filtro atual (de ${fmtN(a.atual.length)})` : "", ` · tempo médio desde a chegada: ${fmtN(Math.round(media * 10) / 10)} dias, contado até ${fmtData(a.referencia_backlog)}.`) }),
-    funilTotais(a, false), // o operador compara esta tela com a planilha dele: mostra de quantas linhas do arquivo viemos
+    funilTotais(a, true, "pendentes", "pendencias"), // aberto: o operador compara esta tela com a planilha dele e precisa ver por que o total é menor (filtros padrão)
     barraFiltros(controles, ativos, limparTudo, "Estes filtros valem só nesta tela."),
     temDados ? [
       h("div", { class: "kpis kpis-6" },
