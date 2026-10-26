@@ -90,7 +90,8 @@ const rotuloIdade = (n: number | null) => (n === null ? "sem data" : n < 0 ? "ap
 const tomIdade = (n: number | null): Tom => (n === null || n < 2 ? "neutro" : n < 4 ? "atencao" : "critico");
 
 // `regs` é o recorte ANTES de excluir datas (as caixas de data precisam mostrar também as excluídas).
-function pivotChegada(o: { regs: RegAtual[]; referencia: string; set: (fn: () => void) => void; est: EstadoPivot }): HTMLElement {
+// `lista` = id do título da lista que a tabela filtra: ao escolher um número a tela desce até ela (o clique não pode parecer mudo).
+function pivotChegada(o: { regs: RegAtual[]; referencia: string; set: (fn: () => void) => void; est: EstadoPivot; lista?: string }): HTMLElement {
   const est = o.est;
   const fora = new Set(est.datasFora);
   const dias = diasDoRecorte(o.regs);
@@ -131,7 +132,7 @@ function pivotChegada(o: { regs: RegAtual[]; referencia: string; set: (fn: () =>
     if (!v) return h("td", { class: cls + " pv-zero" }, "");
     return h("td", { class: cls }, h("button", { type: "button", class: "pv-cel" + (celSel(n, dia) ? " sel" : ""), "aria-pressed": celSel(n, dia) ? "true" : "false",
       title: `${rotuloCelulaPivot({ caminho: n.caminho, data: dia })}: ${plural(v, "encomenda", "encomendas")}. Clique para listar abaixo.`,
-      on: { click: () => o.set(() => { est.cel = celSel(n, dia) ? null : { caminho: n.caminho, data: dia }; }) } }, fmtN(v)));
+      on: { click: () => { const escolhendo = !celSel(n, dia); o.set(() => { est.cel = escolhendo ? { caminho: n.caminho, data: dia } : null; }); if (escolhendo && o.lista) irPara(o.lista); } } }, fmtN(v)));
   };
 
   const cabData = (dia: string) => { const idade = idadeEmDias(dia, ref); return h("th", { class: "num pv-th tom-" + tomIdade(idade), scope: "col" }, fmtDiaCurto(dia), h("small", null, rotuloIdade(idade))); };

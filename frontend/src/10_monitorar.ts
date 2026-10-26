@@ -97,7 +97,7 @@ function telaPendencias(): HTMLElement {
     funilTotais(a, { aberto: false, id: "pendencias", resumo: "equacao" }), // a conta vem numa linha: o operador compara esta tela com a planilha dele e vê por que o total é menor
     barraFiltros(controles, ativos, limparTudo, "Estes filtros valem só nesta tela."),
     temDados ? [
-      pivotChegada({ regs: recorteBruto, referencia: a.referencia_backlog, set, est: pv }),
+      pivotChegada({ regs: recorteBruto, referencia: a.referencia_backlog, set, est: pv, lista: "pl-tit" }),
       h("div", { class: "kpis kpis-6" },
         kpi({ rotulo: "Pendentes", ajuda: "pendente", valor: k.pend, nota: "No filtro atual" }),
         kpi({ rotulo: "Cidades", valor: k.cidades, nota: "Com pendências" }),
@@ -114,7 +114,9 @@ function telaPendencias(): HTMLElement {
         barras({ id: "p-g-prob", ajuda: "tipos_problema", titulo: "Tipos de problema", descricao: "Último problema registrado.", unidade: ["encomenda", "encomendas"], itens: contar(recorte.filter((r) => r.dados["Last Problem Type"] !== null), (r) => r.dados["Last Problem Type"] as string).map((x) => ({ ...x, tom: "atencao" as Tom })), selecionado: selDe("problema"), onSelecionar: selecionar("problema", "Problema"), vazio: "Nenhuma pendente com problema neste filtro." })),
       h("section", { class: "bloco", "aria-labelledby": "pl-tit" },
         h("div", { class: "bloco-cab" }, h("h2", { id: "pl-tit" }, pv.cel ? `Encomendas · ${rotuloCelulaPivot(pv.cel)}` : f.sel ? `Encomendas · ${f.sel.rotulo}` : "Encomendas do recorte"),
-          f.sel || pv.cel ? h("button", { type: "button", class: "link", on: { click: () => set(() => { f.sel = null; pv.cel = null; }) } }, "Limpar seleção") : null),
+          f.sel || pv.cel ? h("span", { class: "pv-ferr" },
+            pv.cel ? h("button", { type: "button", class: "link", on: { click: () => irPara("pv-tit") } }, "↑ Voltar à tabela") : null,
+            h("button", { type: "button", class: "link", on: { click: () => set(() => { f.sel = null; pv.cel = null; }) } }, "Limpar seleção")) : null),
         h("p", { class: "nota" }, "“Entregue” nesta classe é a entrega confirmada pelo próprio relatório (status ou data de assinatura). “Provável entrega” é outra coisa: vem da comparação entre os relatórios."),
         tabela({ id: "pend", titulo: "Encomendas pendentes", colunas: colunasPendencia(), linhas: lista, chave: (r) => awbDe(r.dados), onAbrir: (r) => abrirAwb(awbDe(r.dados)), ordemInicial: { col: "chegada", dir: -1 },
           exportar: botaoExportar("pendencias.xlsx", () => ({ linhas: lista.map((r) => r.dados), colunas: COLS_EXPORT }), "Exportar Excel", "pend") })),

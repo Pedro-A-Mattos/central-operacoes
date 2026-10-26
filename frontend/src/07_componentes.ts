@@ -367,6 +367,16 @@ function tabela<T>(o: {
 }
 
 // Copia o código da encomenda sem abrir o painel de detalhe.
+// Leva a tela até o elemento `id` (título de um bloco) e o foco junto. Respeita "reduzir movimento". Roda depois do redesenho.
+function irPara(id: string) {
+  setTimeout(() => {
+    const el = document.getElementById(id); if (!el) return;
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+    el.scrollIntoView({ behavior: window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    el.focus({ preventScroll: true });
+  });
+}
+
 async function copiarCodigo(awb: string) {
   try { await navigator.clipboard.writeText(awb); aviso(`Código ${awb} copiado.`); }
   catch { aviso("Não foi possível copiar automaticamente. Selecione o código e copie manualmente.", "info"); }

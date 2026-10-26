@@ -731,6 +731,7 @@ button.rl { cursor: pointer; } button.rl:hover { background: var(--sup-2); }
 
 /* ---------- tabela dinâmica: pendentes por data de chegada ---------- */
 .pivot { gap: var(--e-3); }
+#pl-tit, #pv-tit, #exc-lista-tit { scroll-margin-top: 84px; outline: none; } /* o topo fixo não pode cobrir o título */
 .pv-ferr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--e-3); }
 .pv-controles { display: grid; gap: var(--e-2); }
 .pv-grupo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--e-2); }

@@ -260,7 +260,11 @@ function telaExcecoes(): HTMLElement {
         ...(comPivot ? [...pv.datasFora.map((d) => ({ texto: "Sem a chegada de " + (d === SEM_DATA ? "(sem data)" : fmtDia(d)), remover: () => set(() => { pv.datasFora = pv.datasFora.filter((x) => x !== d); pv.cel = null; }) })),
           ...(pv.cel ? [{ texto: "Tabela · " + rotuloCelulaPivot(pv.cel), remover: () => set(() => { pv.cel = null; }) }] : [])] : [])],
       () => set(() => { f.cidades = []; f.bairros = []; f.entregadores = []; pv.datasFora = []; pv.cel = null; })) : null,
-    comPivot && filtrada.length ? pivotChegada({ regs: filtrada, referencia: a.referencia_backlog, set, est: pv }) : null,
+    comPivot && filtrada.length ? pivotChegada({ regs: filtrada, referencia: a.referencia_backlog, set, est: pv, lista: "exc-lista-tit" }) : null,
+    comPivot && pv.cel ? h("div", { class: "bloco-cab" }, h("h2", { id: "exc-lista-tit" }, `Encomendas · ${rotuloCelulaPivot(pv.cel)}`),
+      h("span", { class: "pv-ferr" },
+        h("button", { type: "button", class: "link", on: { click: () => irPara("pv-tit") } }, "↑ Voltar à tabela"),
+        h("button", { type: "button", class: "link", on: { click: () => set(() => { pv.cel = null; }) } }, "Limpar seleção"))) : null,
     base.length
       ? tabela({ id: "exc", titulo: "Pendências de entrega", linhas: lista, chave: (r) => awbDe(r.dados), onAbrir: (r) => abrirAwb(awbDe(r.dados), f.aba !== "justificados" ? "justificar" : ""),
           ordemInicial: aba === "atrasadas" ? { col: "dias", dir: -1 } : undefined,
