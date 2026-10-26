@@ -731,7 +731,10 @@ button.rl { cursor: pointer; } button.rl:hover { background: var(--sup-2); }
 
 /* ---------- tabela dinâmica: pendentes por data de chegada ---------- */
 .pivot { gap: var(--e-3); }
-#pl-tit, #pv-tit, #exc-lista-tit { scroll-margin-top: 84px; outline: none; } /* o topo fixo não pode cobrir o título */
+.cobranca-barra { display: flex; flex-wrap: wrap; align-items: center; gap: var(--e-3); }
+.cobranca-ferr { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--e-3); }
+.cobranca-texto { width: 100%; box-sizing: border-box; min-height: 220px; resize: vertical; padding: var(--e-3); border: 1px solid var(--linha-forte); border-radius: var(--r-2); background: var(--sup-2); color: var(--tinta); font: 400 13px/1.5 var(--f-texto); white-space: pre-wrap; }
+#pl-tit, #pv-tit, #exc-lista-tit, #cob-tit { scroll-margin-top: 84px; outline: none; } /* o topo fixo não pode cobrir o título */
 .pv-ferr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--e-3); }
 .pv-controles { display: grid; gap: var(--e-2); }
 .pv-grupo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--e-2); }

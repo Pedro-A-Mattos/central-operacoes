@@ -261,6 +261,7 @@ function telaExcecoes(): HTMLElement {
           ...(pv.cel ? [{ texto: "Tabela · " + rotuloCelulaPivot(pv.cel), remover: () => set(() => { pv.cel = null; }) }] : [])] : [])],
       () => set(() => { f.cidades = []; f.bairros = []; f.entregadores = []; pv.datasFora = []; pv.cel = null; })) : null,
     comPivot && filtrada.length ? pivotChegada({ regs: filtrada, referencia: a.referencia_backlog, set, est: pv, lista: "exc-lista-tit" }) : null,
+    f.aba === "justificados" ? null : painelCobranca(lista, f.aba, ACAO_PEND[f.aba], a.referencia_backlog),
     comPivot && pv.cel ? h("div", { class: "bloco-cab" }, h("h2", { id: "exc-lista-tit" }, `Encomendas · ${rotuloCelulaPivot(pv.cel)}`),
       h("span", { class: "pv-ferr" },
         h("button", { type: "button", class: "link", on: { click: () => irPara("pv-tit") } }, "↑ Voltar à tabela"),

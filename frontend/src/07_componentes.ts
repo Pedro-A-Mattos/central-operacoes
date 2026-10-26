@@ -377,10 +377,14 @@ function irPara(id: string) {
   });
 }
 
-async function copiarCodigo(awb: string) {
-  try { await navigator.clipboard.writeText(awb); aviso(`Código ${awb} copiado.`); }
-  catch { aviso("Não foi possível copiar automaticamente. Selecione o código e copie manualmente.", "info"); }
+// Copia um texto. Sem permissão da área de transferência, tenta o plano B com o campo `area` (selecionado) e, por fim, orienta a copiar à mão.
+async function copiarTexto(texto: string, ok: string, area?: HTMLTextAreaElement) {
+  try { await navigator.clipboard.writeText(texto); aviso(ok); return; } catch { /* tenta o plano B */ }
+  try { if (area) { area.focus(); area.select(); if (document.execCommand("copy")) { aviso(ok); return; } } } catch { /* sem plano B */ }
+  aviso("Não foi possível copiar automaticamente. Selecione o texto e copie manualmente.", "info");
 }
+
+function copiarCodigo(awb: string) { return copiarTexto(awb, `Código ${awb} copiado.`); }
 
 // Código da encomenda (abre o detalhe) com o botão de copiar ao lado.
 function awbComCopia(awb: string): HTMLElement {
