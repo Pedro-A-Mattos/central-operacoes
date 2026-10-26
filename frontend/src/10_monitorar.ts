@@ -56,7 +56,6 @@ function telaPendencias(): HTMLElement {
     ...f.rota.map((c) => ({ texto: "Em rota: " + c, remover: () => set(() => { f.rota = f.rota.filter((x) => x !== c); }) })),
     ...f.dias.map((c) => ({ texto: "Chegada: " + fmtDia(c), remover: () => set(() => { f.dias = f.dias.filter((x) => x !== c); }) })),
     ...(f.ocorrencia ? [{ texto: f.ocorrencia === "vigente" ? "Ocorrência vigente" : "Ocorrência já tratada", remover: () => set(() => { f.ocorrencia = ""; }) }] : []),
-    ...(f.ocorrencia ? [{ texto: f.ocorrencia === "vigente" ? "Ocorrência vigente" : "Ocorrência já tratada", remover: () => set(() => { f.ocorrencia = ""; }) }] : []),
     ...(f.soProblema ? [{ texto: "Somente com problema", remover: () => set(() => { f.soProblema = false; }) }] : []),
     ...(f.semEntregador ? [{ texto: "Somente sem entregador", remover: () => set(() => { f.semEntregador = false; }) }] : []),
     ...(f.sel ? [{ texto: "Seleção no gráfico · " + f.sel.rotulo, remover: () => set(() => { f.sel = null; }) }] : []),
