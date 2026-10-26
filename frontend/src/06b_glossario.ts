@@ -248,8 +248,8 @@ const GLOSSARIO: Record<string, Explicacao> = {
   tempo_espera: {
     titulo: "Há quanto tempo aguardam",
     oQue: "Quantos dias se passaram desde que a encomenda chegou ao galpão. Ajuda a priorizar o que está parado há mais tempo (backlog).",
-    calculo: "Referência menos a data de chegada (Arrival Time). Faixas: 0–1 dia (menos de 2 dias), 2–3 dias (de 2 a menos de 4) e 4+ dias.",
-    exemplo: "Chegou dia 06 às 14h e a referência é dia 10 às 14h: 4 dias, faixa 4+ dias.",
+    calculo: "Dias de calendário entre o dia de chegada (Arrival Time) e o dia da referência: chegou hoje, “no dia”; chegou ontem, “há 1 dia”. Em cores: até 1 dia verde, 2 a 3 dias amarelo, 4 ou mais vermelho.",
+    exemplo: "Chegou dia 06 às 23h e a referência é dia 10 às 08h: “há 4 dias”, mesmo com pouco mais de 3 dias corridos.",
     acao: "A referência aparece no topo da tela. Veja de onde ela veio no “?” da referência.",
   },
   pivot_chegada: {

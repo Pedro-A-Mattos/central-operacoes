@@ -234,7 +234,7 @@ function mapaCanvas(pts: PontoMapa[], corDe: (r: RegAtual) => { chave: string; t
         const d = p.r.dados;
         const cor = corDe(p.r);
         const linha = (rot: string, val: Valor | string | null | undefined) => (val === null || val === undefined || String(val).trim() === "") ? "" : `<div><span>${rot}</span> ${String(val).replace(/</g, "&lt;")}</div>`;
-        const faixa = p.r.faixa_backlog ? `${p.r.faixa_backlog}${p.r.backlog_dias != null ? ` (${fmtDias(p.r.backlog_dias)})` : ""}` : null;
+        const chegada = diaChegada(p.r) === SEM_DATA ? null : `${fmtDiaCurto(diaChegada(p.r))} · ${rotuloIdade(idadeEmDias(diaChegada(p.r), E.analise!.referencia_backlog.slice(0, 10)))}`;
         dica.innerHTML = `<strong class="mono">${awbDe(d)}</strong>`
           + `<div class="mapa-dica-cor"><i class="tom-${cor.tom}"></i> ${cor.chave}</div>`
           + linha("Cidade", d["Consignee City"])
@@ -243,7 +243,7 @@ function mapaCanvas(pts: PontoMapa[], corDe: (r: RegAtual) => { chave: string; t
           + linha("Entregador", entregadorDe(d))
           + linha("Status", d["Last Scan Status"])
           + linha("Problema", d["Last Problem Type"])
-          + (faixa ? linha("Aguardando", faixa) : "")
+          + (chegada ? linha("Chegou", chegada) : "")
           + (p.r.erro_piso ? `<div class="mapa-dica-erro">${p.r.erro_piso.tipo}${p.r.erro_piso.esperados.length ? " · deveria: " + p.r.erro_piso.esperados.join(" ou ") : ""}</div>` : "");
         const rect = canvas.getBoundingClientRect();
         const dx = ((lonParaX(p.lon, z) - (lonParaX(vistaMapa.lon, z) - W / 2)) / W) * rect.width;
@@ -290,12 +290,27 @@ function telaMapa(): HTMLElement {
   const comCoord = new Set(pts.map((p) => awbDe(p.r.dados)));
   const semCoordRegs = doRecorte.filter((r) => !comCoord.has(awbDe(r.dados)));
   const semCoord = semCoordRegs.length;
+  // Cor por data de chegada: uma categoria por dia ("12/10 · no dia", "10/10 · há 2 dias"...), com o mesmo tom de antes
+  // (até 1 dia: verde; 2 a 3: amarelo; 4 ou mais: vermelho), em dias de calendário até a referência.
+  const refDiaMapa = a.referencia_backlog.slice(0, 10);
+  const chegadaDe = (r: RegAtual): { chave: string; tom: string; idade: number | null } => {
+    const d = diaChegada(r);
+    if (d === SEM_DATA) return { chave: "Sem data", tom: "neutro", idade: null };
+    const idade = idadeEmDias(d, refDiaMapa);
+    return { chave: `${fmtDiaCurto(d)} · ${rotuloIdade(idade)}`, tom: idade !== null && idade < 2 ? "ok" : tomIdade(idade), idade };
+  };
   const corDe = (r: RegAtual): { chave: string; tom: string } => {
-    if (m.cor === "espera") return { chave: r.faixa_backlog || "Sem data", tom: r.faixa_backlog ? TOM_FAIXA[r.faixa_backlog] : "neutro" };
+    if (m.cor === "espera") { const c = chegadaDe(r); return { chave: c.chave, tom: c.tom }; }
     if (m.cor === "rota") { const f = faixaRota(r) || "Entregue"; return { chave: f, tom: TOM_ROTA[f] || "ok" }; }
     return situacaoMapa(r);
   };
-  const ordemLeg = m.cor === "espera" ? ["0-1 dia", "2-3 dias", "4+ dias", "Sem data"] : m.cor === "rota" ? [...FAIXAS_ROTA, "Entregue"] : ["Erro de piso", "Ocorrência vigente", "Sem alerta"];
+  // legenda por data: do dia mais recente para o mais antigo, "Sem data" por último
+  const ordemEspera = (() => {
+    const m2 = new Map<string, number>();
+    for (const r of doRecorte) { const c = chegadaDe(r); m2.set(c.chave, c.idade ?? 1e9); }
+    return [...m2].sort((x, y) => x[1] - y[1]).map(([k]) => k);
+  })();
+  const ordemLeg = m.cor === "espera" ? ordemEspera : m.cor === "rota" ? [...FAIXAS_ROTA, "Entregue"] : ["Erro de piso", "Ocorrência vigente", "Sem alerta"];
   const contagem = new Map<string, { n: number; tom: string }>();
   for (const p of pts) { const cor = corDe(p.r); const c = contagem.get(cor.chave) || { n: 0, tom: cor.tom }; c.n++; contagem.set(cor.chave, c); }
 
@@ -356,7 +371,7 @@ function telaMapa(): HTMLElement {
         h("option", { value: "" }, "Todos"), entregadores.map((c) => h("option", { value: c, selected: m.entregador === c }, c)))),
       h("label", { class: "sel-ordem" }, h("span", null, "Colorir por"), h("select", { id: "mp-cor", on: { change: (e: Event) => atualizar(() => { m.cor = (e.target as HTMLSelectElement).value as typeof m.cor; }) } },
         h("option", { value: "situacao", selected: m.cor === "situacao" }, "Situação (piso e ocorrências)"),
-        h("option", { value: "espera", selected: m.cor === "espera" }, "Há quanto tempo aguardam"),
+        h("option", { value: "espera", selected: m.cor === "espera" }, "Data de chegada"),
         h("option", { value: "rota", selected: m.cor === "rota" }, "Tempo em rota"))))),
     avisoSemCoord,
     h("figure", { class: "grafico" },

@@ -110,7 +110,7 @@ function gaveta(): HTMLElement | null {
         campo(r ? "No relatório atualizado" : "Último status", val(d, "Last Scan Status")))),
       h("section", { class: "gav-sec" }, h("h3", null, "Chegada e tempo"), h("dl", { class: "campos" },
         campo("Chegada ao galpão", val(d, "Arrival Time")),
-        r ? campo("Aguardando", r.backlog_dias !== null ? h("span", null, chipFaixa(r.faixa_backlog), " ", fmtDias(r.backlog_dias)) : h("span", { class: "nulo" }, "Sem data de chegada")) : null,
+        r ? campo("Chegou", r.backlog_dias !== null ? h("span", null, chipIdadeChegada(r), " ", fmtDias(r.backlog_dias)) : h("span", { class: "nulo" }, "Sem data de chegada")) : null,
         campo("Saída para entrega", val(d, "Delivery Time")),
         r ? campo("Em rota há", r.em_rota_min !== null ? h("span", null, fmtMin(r.em_rota_min)) : h("span", { class: "nulo" }, r.entrega_confirmada ? "Entregue" : "Sem saída registrada")) : null,
         campo("Entrega confirmada em", val(d, "Sign Date")),

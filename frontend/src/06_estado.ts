@@ -5,7 +5,7 @@ type Tela = "importar" | "torre" | "piso" | "excecoes" | "pendencias" | "entrega
 
 interface SelecaoGrafico { dim: "cidade" | "entregador" | "problema" | "classe" | "rota"; valor: string; rotulo: string }
 
-interface FiltrosPend { ocorrencia: "" | "vigente" | "tratada"; cidades: string[]; bairros: string[]; classes: string[]; faixas: string[]; rota: string[]; dias: string[]; soProblema: boolean; semEntregador: boolean; sel: SelecaoGrafico | null }
+interface FiltrosPend { ocorrencia: "" | "vigente" | "tratada"; cidades: string[]; bairros: string[]; classes: string[]; rota: string[]; dias: string[]; soProblema: boolean; semEntregador: boolean; sel: SelecaoGrafico | null }
 interface FiltrosPiso { tipos: string[]; cidades: string[]; bairros: string[]; entregadores: string[]; vista?: "tabela" | "roteiro" }
 interface FiltrosExc { aba: AbaPend; cidades: string[]; bairros: string[]; entregadores: string[] }
 // `agrupar`: "entregador" (uma linha por pessoa) ou "cidade" (cidade e, dentro dela, cada entregador). `sel.cidade` só existe no segundo.
@@ -18,7 +18,7 @@ type RefAwb =
 
 const pivotVazio = (): EstadoPivot => ({ dims: ["cidade"], datasFora: [], fechados: [], cel: null });
 const filtrosVazios = () => ({
-  pendencias: { ocorrencia: "", cidades: [], bairros: [], classes: [], faixas: [], rota: [], dias: [], soProblema: false, semEntregador: false, sel: null } as FiltrosPend,
+  pendencias: { ocorrencia: "", cidades: [], bairros: [], classes: [], rota: [], dias: [], soProblema: false, semEntregador: false, sel: null } as FiltrosPend,
   pivot: pivotVazio(),         // tabela dinâmica da tela Pendências
   pivotEntrega: pivotVazio(),  // a da aba Pendentes de Pendências de entrega: estado próprio, para uma tela não mexer na outra
   piso: { tipos: [], cidades: [], bairros: [], entregadores: [] } as FiltrosPiso,

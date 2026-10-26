@@ -13,7 +13,10 @@ function telaTorre(): HTMLElement {
   const piso = errosPiso();
   const porTipo = contar(piso, (r) => r.erro_piso!.tipo);
   const t1 = pendAcao("tent1"), t2 = pendAcao("tent2"), t3 = pendAtivas("tent3"), ext = pendAtivas("extravio"), avr = pendAtivas("avaria"), atr = pendAtivas("atrasadas");
-  const velhas = a.atual.filter((r) => r.faixa_backlog === "4+ dias");
+  // Antigas: chegaram há 4 dias ou mais, em dias de calendário (a mesma idade da tabela por data de chegada).
+  const refDiaT = a.referencia_backlog.slice(0, 10);
+  const diasVelhos = diasDoRecorte(a.atual).map((x) => x.dia).filter((d) => d !== SEM_DATA && (idadeEmDias(d, refDiaT) ?? 0) >= 4);
+  const velhas = a.atual.filter((r) => diasVelhos.includes(diaChegada(r)));
   const comProblema = a.atual.filter((r) => r.dados["Last Problem Type"] !== null);
   const vigentes = comProblema.filter((r) => !r.reroteada && !r.entrega_confirmada);
   const tratadasN = a.atual.filter((r) => r.reroteada && !r.entrega_confirmada).length;
@@ -38,8 +41,8 @@ function telaTorre(): HTMLElement {
   const longas = a.atual.filter((r) => faixaRota(r) === "Mais de 24 h");
   if (longas.length) alertas.push({ tom: "atencao", n: longas.length, texto: `${plural(longas.length, "encomenda saiu", "encomendas saíram")} para entrega há mais de 24 h e ${longas.length === 1 ? "segue" : "seguem"} sem entrega confirmada`, origem: "Pendências · tempo em rota", acao: "Cobrar retorno do entregador",
     ir: () => navegar("pendencias", { de: "torre", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, rota: ["Mais de 24 h"] }; } }) });
-  if (velhas.length) alertas.push({ tom: "atencao", n: velhas.length, texto: `${plural(velhas.length, "encomenda chegou", "encomendas chegaram")} há 4 dias ou mais e ${velhas.length === 1 ? "segue pendente" : "seguem pendentes"}`, origem: "Pendências", acao: "Priorizar",
-    ir: () => navegar("pendencias", { de: "torre", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, faixas: ["4+ dias"] }; } }) });
+  if (velhas.length) alertas.push({ tom: "atencao", n: velhas.length, texto: `${plural(velhas.length, "encomenda chegou", "encomendas chegaram")} há 4 dias ou mais (${fmtDiaCurto(diasVelhos[diasVelhos.length - 1])} e antes) e ${velhas.length === 1 ? "segue pendente" : "seguem pendentes"}`, origem: "Pendências", acao: "Priorizar",
+    ir: () => navegar("pendencias", { de: "torre", prep: () => { E.f.pendencias = { ...filtrosVazios().pendencias, dias: diasVelhos }; } }) });
   if (a.resumo.saiu_devolucao) alertas.push({ tom: "inferido", n: a.resumo.saiu_devolucao, texto: `${plural(a.resumo.saiu_devolucao, "encomenda saiu", "encomendas saíram")} do relatório com indício de devolução`, origem: "O que mudou", acao: "Confirmar com a transportadora",
     ir: () => navegar("mudancas", { de: "torre", prep: () => { E.f.mudancas.aba = "possivel_devolucao"; } }) });
 

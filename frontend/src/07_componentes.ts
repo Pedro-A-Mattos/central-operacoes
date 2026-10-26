@@ -43,10 +43,15 @@ const ROTULO_EXC: Record<TipoExcecao, string> = { devolucao: "Devolução", extr
 const TOM_EXC: Record<TipoExcecao, Tom> = { devolucao: "critico", extravio: "critico", insucesso: "atencao", revisar_tentativas: "atencao", avaria: "critico" };
 // "regra do CEP", "regra do bairro"... conforme o escopo que decidiu a conferência.
 const ROTULO_ESCOPO: Record<string, string> = { cep: "do CEP", bairro: "do bairro", "cep+bairro": "do CEP e do bairro", cidade: "da cidade" };
-const TOM_FAIXA: Record<string, Tom> = { "0-1 dia": "ok", "2-3 dias": "atencao", "4+ dias": "critico" };
 const TOM_CLASSE: Record<string, Tom> = { "Entregue": "ok", "Não entregue": "neutro", "Anormal": "atencao" };
 const chipErro = (t: string) => chip(t, TOM_ERRO[t] || "neutro", TOM_ERRO[t] === "critico" ? "critico" : "alerta");
-const chipFaixa = (f: string | null) => (f ? chip(f, TOM_FAIXA[f], "relogio") : chip("Sem data", "neutro"));
+// Idade da chegada em dias de calendário até a referência ("no dia", "há 2 dias"), com o tom da tabela por data.
+const chipIdadeChegada = (r: RegAtual) => {
+  const d = diaChegada(r);
+  if (d === SEM_DATA || !E.analise) return chip("Sem data", "neutro");
+  const idade = idadeEmDias(d, E.analise.referencia_backlog.slice(0, 10));
+  return chip(rotuloIdade(idade), idade !== null && idade < 2 ? "ok" : tomIdade(idade), "relogio");
+};
 
 // ---------- KPI ----------
 function kpi(o: { rotulo: string; valor: number | string; nota: string; tom?: Tom; selo?: Selo; destino?: () => void; id?: string; ajuda?: string }): HTMLElement {

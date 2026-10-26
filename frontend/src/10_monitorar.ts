@@ -8,7 +8,6 @@ function filtrarPendencias(f: FiltrosPend): RegAtual[] {
     if (f.cidades.length && !f.cidades.includes(String(d["Consignee City"]))) return false;
     if (f.bairros.length && !f.bairros.includes(String(d["Consignee Area"]))) return false;
     if (f.classes.length && !f.classes.includes(r.classe_operacional)) return false;
-    if (f.faixas.length && !(r.faixa_backlog && f.faixas.includes(r.faixa_backlog))) return false;
     if (f.rota.length) { const fr = faixaRota(r); if (!fr || !f.rota.includes(fr)) return false; }
     if (f.dias.length) { const dt = paraData(d["Arrival Time"]); if (!dt || !f.dias.includes(diaIso(dt))) return false; }
     if (f.soProblema && d["Last Problem Type"] === null) return false;
@@ -54,7 +53,6 @@ function telaPendencias(): HTMLElement {
     ...f.cidades.map((c) => ({ texto: "Cidade: " + c, remover: () => set(() => { f.cidades = f.cidades.filter((x) => x !== c); }) })),
     ...f.bairros.map((c) => ({ texto: "Bairro: " + c, remover: () => set(() => { f.bairros = f.bairros.filter((x) => x !== c); }) })),
     ...f.classes.map((c) => ({ texto: "Classe: " + c, remover: () => set(() => { f.classes = f.classes.filter((x) => x !== c); }) })),
-    ...f.faixas.map((c) => ({ texto: "Aguardando: " + c, remover: () => set(() => { f.faixas = f.faixas.filter((x) => x !== c); }) })),
     ...f.rota.map((c) => ({ texto: "Em rota: " + c, remover: () => set(() => { f.rota = f.rota.filter((x) => x !== c); }) })),
     ...f.dias.map((c) => ({ texto: "Chegada: " + fmtDia(c), remover: () => set(() => { f.dias = f.dias.filter((x) => x !== c); }) })),
     ...(f.ocorrencia ? [{ texto: f.ocorrencia === "vigente" ? "Ocorrência vigente" : "Ocorrência já tratada", remover: () => set(() => { f.ocorrencia = ""; }) }] : []),

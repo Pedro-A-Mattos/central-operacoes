@@ -225,7 +225,7 @@ Origem: uso real da torre de controle e das telas de pendência. Tudo abaixo viv
 ### Pendentes por data de chegada (substitui as faixas 0-1 / 2-3 / 4+ dias na navegação)
 - Tabela dinâmica cidade × dia de chegada (Pendências e aba Pendentes de Pendências de entrega). Caixas "Detalhar por" abrem entregador, bairro e endereço, nessa ordem; caixas de data tiram um dia da soma; clicar num número lista as encomendas; exportação em .xlsx.
 - A idade de cada data é em **dias de calendário** até o dia da referência do relatório. Peça sem data de chegada vai para a coluna "Sem data".
-- As faixas seguem nos dois motores e na gaveta de alguns alertas, mas deixaram de ser o caminho de navegação.
+- As faixas 0-1 / 2-3 / 4+ saíram da interface (Torre, Pendências, alerta de encomendas antigas, cor do Mapa e gaveta da encomenda): tudo usa a data de chegada e a idade em dias de calendário. O campo `faixa_backlog` continua no contrato dos dois motores (paridade e critérios de aceite), sem uso na tela. O alerta "chegaram há 4 dias ou mais" agora usa a idade em dias de calendário, igual à tabela.
 - **Estado da tabela.** Pendências e a aba Pendentes de Pendências de entrega têm cada uma o seu estado (datas tiradas, célula, linhas recolhidas): mexer numa não muda a outra. Quem chega por um atalho de outra tela (Torre, Mapa) encontra a tabela sem datas tiradas nem célula selecionada, para o número bater com o que foi clicado; o desenho (entregador, bairro, endereço) fica como o usuário deixou. Abrir pelo menu mantém tudo. Teste: `frontend/tests/estado_pivot.mjs`.
 
 ### Regra de pendência (aba "Pendentes")

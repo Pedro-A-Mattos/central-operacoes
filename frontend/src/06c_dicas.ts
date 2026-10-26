@@ -10,7 +10,7 @@ const APELIDOS_DICAS: Record<string, string> = {
   "Erro de piso": "situacao_erro_piso", "Sem alerta": "situacao_sem_alerta", "Cidade ausente": "erro_cidade_ausente", "Sem coordenada": "sem_coordenada",
   "Anormal": "anormal", "Nova": "novas", "Pendentes": "pendente", "Pendências": "pendente",
   // faixas de espera e de tempo em rota
-  "0-1 dia": "tempo_espera", "2-3 dias": "tempo_espera", "4+ dias": "tempo_espera", "Sem data": "tempo_espera", "Aguardando": "tempo_espera",
+  "Sem data": "tempo_espera", "Aguardando": "tempo_espera", "Chegou": "tempo_espera",
   "Menos de 12 h": "tempo_rota", "12 a 24 h": "tempo_rota", "Mais de 24 h": "tempo_rota", "Sem saída registrada": "tempo_rota", "Em rota há": "tempo_rota",
   // abas e listas
   "Extravios": "extravio", "Avarias": "avaria", "Seguir o processo de avaria": "avaria", "Insucessos": "insucesso", "Mudanças de status": "mudou_status", "Roteiro por entregador": "roteiro",
