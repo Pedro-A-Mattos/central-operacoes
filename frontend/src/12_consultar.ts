@@ -158,7 +158,7 @@ function telaRegras(): HTMLElement {
   const semPrazoAtual = cidadesSemPrazo();
   const semPrazo = EDIT.semPrazo ?? semPrazoAtual;
   // impacto da mudança, sem salvar: quantas peças são pendência com a lista nova e com a atual
-  const contarPend = (l: string[]) => { const ch = new Set(l.map(chaveCidade)), ref = refDiaAnalise(); return a.atual.filter((r) => ehPendencia(r, ref, ch)).length; };
+  const contarPend = (l: string[]) => { const ch = new Set(l.map(chaveCidade)), ref = refDiaAnalise(); return a.atual.filter((r) => ehPendencia(r, ref, ch) && !justificada(awbDe(r.dados))).length; };
   const limiar = EDIT.limiar || E.params.limiar_ruido;
 
   const linhas = cidades.map((c) => ({ cidade: c, ...a.regras.por_cidade[c] }));

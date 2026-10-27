@@ -38,7 +38,7 @@ const APELIDOS_DICAS: Record<string, string> = {
   "Pendências por localização": "mapa", "Resumo por entregador": "desempenho", "Cidades ignoradas": "cidades_ignoradas",
   "Pendências · tempo em rota": "tempo_rota", "Regra RN-003 · decisão pendente": "entregue_confirmada", "Como a conferência decide": "regra_derivada",
   // colunas gerais
-  "Cidade · bairro": "col_local", "Código (AWB)": "col_awb", "Waybill No": "col_awb", "Chegada ao galpão": "col_chegada", "Tempo em espera": "tempo_espera", "Há quanto tempo em rota": "tempo_rota",
+  "Cidade · bairro": "col_local", "Código (AWB)": "col_awb", "Waybill No": "col_awb", "Chegada ao galpão": "col_chegada", "Chegou em": "col_chegada", "Tempo em espera": "tempo_espera", "Há quanto tempo em rota": "tempo_rota",
   "Status": "col_status", "Status atual": "col_status", "Último status na base": "col_status", "Last Scan Status": "col_status",
   "Problema": "tipos_problema", "Last Problem Type": "tipos_problema",
   // títulos de gráficos
@@ -55,6 +55,8 @@ const _chaveDica = (s: string) => normalizarBusca(s).replace(/\s+/g, " ");
 const APELIDOS_POR_CONTEXTO: { seletor: string; mapa: Record<string, string> }[] = [
   // Conferência de piso: "Problema" é o tipo de erro de piso (nas outras telas é a ocorrência registrada pela transportadora)
   { seletor: "#ms-pi-tipo .ms-rot, .piso-layout th", mapa: { "Problema": "piso_problema" } },
+  // A aba "Pendentes" de Pendências de entrega é a regra de prazo; "Pendentes" nos indicadores é o conceito geral
+  { seletor: ".aba", mapa: { "Pendentes": "atrasadas" } },
   { seletor: ".chip", mapa: { "Entregue": "classe_operacional", "Não entregue": "classe_operacional" } },
   { seletor: ".barra-rotulo", mapa: { "Reprogramação": "tipo_reprogramacao", "Não entregue": "tipo_nao_entregue", "Lost package": "tipo_lost", "Avaria": "tipo_avaria" } },
 ];
@@ -66,7 +68,7 @@ const INDICE_DICAS: Map<string, string> = (() => {
   return m;
 })();
 
-const SELETOR_DICAS = ".chip, .aba, .mapa-leg li, .legenda > span, .rl, .kpi-rotulo, th, .barra-rotulo, .ms-rot, .alternar, .fig-tit > strong, .alerta-origem, .funil-rot, .alerta-txt > strong";
+const SELETOR_DICAS = ".chip, .aba, .mapa-leg li, .legenda > span, .rl, .kpi-rotulo, th, .barra-rotulo, .ms-rot, .alternar, .fig-tit > strong, h2.fig-tit, .alerta-origem, .funil-rot, .alerta-txt > strong";
 
 // Texto do rótulo, sem contagens, setas de ordenação nem botões "?" que moram dentro do mesmo elemento.
 function rotuloDoElemento(el: Element): string {
@@ -83,6 +85,7 @@ function rotuloDoElemento(el: Element): string {
 function chaveDoRotulo(texto: string, el?: Element): string | null {
   if (!texto) return null;
   const candidatos = [texto, texto.split(":")[0], texto.replace(/[\d.,%+\s]+$/, "")];
+  if (candidatos.some((c) => /^\d{2}\/\d{2} · (no dia|há \d+ dias?|após a referência)$/.test(c))) return "tempo_espera"; // legenda do Mapa por data de chegada
   if (el) for (const ctx of APELIDOS_POR_CONTEXTO) if (el.matches(ctx.seletor)) {
     for (const c of candidatos) { const k = Object.entries(ctx.mapa).find(([rot]) => _chaveDica(rot) === _chaveDica(c)); if (k) return k[1]; }
   }
