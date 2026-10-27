@@ -123,7 +123,8 @@ interface Simulacao {
   mudancas: { awb: string; cidade: Valor; entregador: Valor; antes: string | null; depois: string | null }[];
 }
 
-interface Overrides { por_cidade: Record<string, string[]>; cidades_ignoradas: string[] }
+// cidades_sem_prazo: cidades em que toda peça é pendência, qualquer que seja a data de chegada. Ausente ou null = nunca definido (vale o padrão, Unaí); [] = nenhuma.
+interface Overrides { por_cidade: Record<string, string[]>; cidades_ignoradas: string[]; cidades_sem_prazo?: string[] | null }
 
 // Modo Estudo/Validação por região (CEP). Mapa gerado no Estudo e consumido na Validação.
 // Mapa região -> entregadores. Os campos além dos conjuntos (suporte, entregadores, meta) são opcionais: mapas antigos continuam válidos.

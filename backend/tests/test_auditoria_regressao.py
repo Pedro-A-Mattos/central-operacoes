@@ -324,3 +324,20 @@ def test_m04_data_nao_reconhecida_aparece_na_qualidade():
     info = validar_arquivo(rel(L(1, arr="12/10/2026 06:00"), L(2, arr="amanhã cedo"), L(3)), "r.xlsx")
     item = next(q for q in info["qualidade"] if q["codigo"] == "datas_invalidas")
     assert item["n"] == 1  # só "amanhã cedo": a data brasileira é aceita
+
+
+# ----------------------------------------------------------------- cidades sem prazo de chegada (regra da tela, guardada com as regras)
+def test_regras_guardam_cidades_sem_prazo(tmp_path, monkeypatch):
+    from api import servico as sv
+    monkeypatch.setattr(sv, "ARQ_REGRAS", tmp_path / "regras_piso.json")
+    assert sv.obter_regras()["cidades_sem_prazo"] is None  # nunca definido: a tela usa o padrão (Unaí)
+    salvo = sv.salvar_regras({"por_cidade": {}, "cidades_ignoradas": [], "cidades_sem_prazo": ["Unaí", "Buritis", "Unaí"]})
+    assert salvo["cidades_sem_prazo"] == ["Buritis", "Unaí"] and sv.obter_regras()["cidades_sem_prazo"] == ["Buritis", "Unaí"]
+    sv.salvar_regras({"por_cidade": {}, "cidades_ignoradas": [], "cidades_sem_prazo": []})
+    assert sv.obter_regras()["cidades_sem_prazo"] == []  # lista vazia é escolha (nenhuma cidade), diferente de nunca definido
+    # quem salva sem o campo (cliente antigo) volta a "nunca definido" em vez de quebrar
+    assert sv.salvar_regras({"por_cidade": {}, "cidades_ignoradas": ["Arinos"]})["cidades_sem_prazo"] is None
+    # arquivo antigo, sem o campo
+    (tmp_path / "regras_piso.json").write_text('{"por_cidade": {}, "cidades_ignoradas": ["Arinos"]}', encoding="utf-8")
+    r = sv.obter_regras()
+    assert r["cidades_sem_prazo"] is None and r["cidades_ignoradas"] == ["Arinos"]

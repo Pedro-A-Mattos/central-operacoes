@@ -197,8 +197,10 @@ def obter_regras() -> dict:
 
 
 def salvar_regras(overrides: dict) -> dict:
+    sem_prazo = overrides.get("cidades_sem_prazo")
     limpo = {"por_cidade": {str(c): sorted({str(e) for e in v}) for c, v in (overrides.get("por_cidade") or {}).items()},
-             "cidades_ignoradas": sorted({str(c) for c in overrides.get("cidades_ignoradas") or []})}
+             "cidades_ignoradas": sorted({str(c) for c in overrides.get("cidades_ignoradas") or []}),
+             "cidades_sem_prazo": sorted({str(c) for c in sem_prazo}) if isinstance(sem_prazo, list) else None}
     rg.salvar_overrides(ARQ_REGRAS, limpo)
     return limpo
 

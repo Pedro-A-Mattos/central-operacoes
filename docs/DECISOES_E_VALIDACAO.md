@@ -229,7 +229,7 @@ Origem: uso real da torre de controle e das telas de pendência. Tudo abaixo viv
 - **Estado da tabela.** Pendências e a aba Pendentes de Pendências de entrega têm cada uma o seu estado (datas tiradas, célula, linhas recolhidas): mexer numa não muda a outra. Quem chega por um atalho de outra tela (Torre, Mapa) encontra a tabela sem datas tiradas nem célula selecionada, para o número bater com o que foi clicado; o desenho (entregador, bairro, endereço) fica como o usuário deixou. Abrir pelo menu mantém tudo. Teste: `frontend/tests/estado_pivot.mjs`.
 
 ### Regra de pendência (aba "Pendentes")
-- É pendência: toda peça de **Unaí**, qualquer que seja a data de chegada; nas demais cidades, a peça que chegou **antes do dia da referência**.
+- É pendência: toda peça de uma **cidade sem prazo**, qualquer que seja a data de chegada (por padrão só **Unaí**; a lista se edita em Regras de abrangência > "Cidades sem prazo de chegada", mostra o impacto antes de salvar e não reprocessa o relatório); nas demais cidades, a peça que chegou **antes do dia da referência**. "Nunca definida" (padrão Unaí) é diferente de lista vazia (nenhuma cidade com exceção). O campo `cidades_sem_prazo` fica junto das regras (`regras_piso.json` e API).
 - Não é pendência: peça de outra cidade que chegou no dia da referência; entrega confirmada; peça com **tentativa de entrega no dia da referência** (ela aparece nas listas de tentativas). Sem data de chegada conta como pendência.
 - Substitui a regra antiga ("2 dias ou mais"). A gaveta da encomenda explica, em cada caso, por que ela conta ou não.
 - **A validar com a operação:** o dia da referência é o do relatório atualizado (não o dia de hoje); "tentativa no dia" usa `Last Problem Date` com `Delivery Count` ≥ 1.

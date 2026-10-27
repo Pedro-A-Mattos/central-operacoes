@@ -98,10 +98,14 @@ def derivar_regras(base: pd.DataFrame, limiar_ruido: int = LIMIAR_RUIDO,
 def carregar_overrides(caminho: str | Path) -> dict:
     try:
         dados = json.loads(Path(caminho).read_text(encoding="utf-8"))
+        sem_prazo = dados.get("cidades_sem_prazo")
         return {"por_cidade": dict(dados.get("por_cidade", {})),
-                "cidades_ignoradas": list(dados.get("cidades_ignoradas", []))}
+                "cidades_ignoradas": list(dados.get("cidades_ignoradas", [])),
+                # cidades em que toda peça é pendência, qualquer que seja a data de chegada (regra da tela, não do motor).
+                # None = nunca definido (a tela usa o padrão, Unaí); lista vazia = escolha de não ter nenhuma.
+                "cidades_sem_prazo": list(sem_prazo) if isinstance(sem_prazo, list) else None}
     except (OSError, json.JSONDecodeError, AttributeError):
-        return {"por_cidade": {}, "cidades_ignoradas": []}
+        return {"por_cidade": {}, "cidades_ignoradas": [], "cidades_sem_prazo": None}
 
 
 def salvar_overrides(caminho: str | Path, overrides: dict) -> None:

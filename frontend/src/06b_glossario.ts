@@ -143,6 +143,12 @@ const GLOSSARIO: Record<string, Explicacao> = {
     oQue: "Cidades com 3 ou mais entregadores no relatório base são conferidas bairro a bairro, porque cada entregador costuma cobrir uma região.",
     calculo: "Valor fixo no MVP (3 entregadores). Um ajuste manual faz a cidade voltar a ser conferida pela cidade inteira.",
   },
+  cidades_sem_prazo: {
+    titulo: "Cidades sem prazo de chegada",
+    oQue: "Cidades em que toda peça é pendência, qualquer que seja a data de chegada. Nas demais, a peça só vira pendência depois do dia da referência.",
+    calculo: "Vale na lista Pendentes de Pendências de entrega, no alerta da Torre e no número de peças que pedem ação. Por padrão é só Unaí (decisão da operação em 24/10/2026).",
+    aviso: "Não recalcula o relatório: muda só o que é tratado como pendência. Fica gravado e vale para as próximas importações.",
+  },
   cidades_ignoradas: {
     titulo: "Cidades fora da conferência",
     oQue: "Cidades cujas encomendas não passam pela conferência de piso.",
@@ -158,8 +164,8 @@ const GLOSSARIO: Record<string, Explicacao> = {
   },
   atrasadas: {
     titulo: "Pendentes",
-    oQue: "Encomendas que pedem atenção por prazo: todas as de Unaí e, nas demais cidades, as que chegaram antes do dia da referência.",
-    calculo: "Unaí: sempre, qualquer que seja a data de chegada (Arrival Time). Demais cidades: o dia de chegada é anterior ao dia da referência do relatório (prazo de um dia vencido). Ficam de fora a peça de outra cidade que chegou no dia da referência, a que tem entrega confirmada e a que teve tentativa de entrega no dia da referência (essa aparece nas listas de tentativas).",
+    oQue: "Encomendas que pedem atenção por prazo: todas as das cidades sem prazo (por padrão, Unaí) e, nas demais cidades, as que chegaram antes do dia da referência.",
+    calculo: "Cidades sem prazo: sempre, qualquer que seja a data de chegada (Arrival Time); a lista está em Regras de abrangência. Demais cidades: o dia de chegada é anterior ao dia da referência do relatório (prazo de um dia vencido). Ficam de fora a peça de outra cidade que chegou no dia da referência, a que tem entrega confirmada e a que teve tentativa de entrega no dia da referência (essa aparece nas listas de tentativas).",
     exemplo: "Referência dia 12: uma peça de Buritis que chegou dia 11 é pendente; uma que chegou dia 12 não é. Uma peça de Unaí que chegou dia 12 é pendente.",
     aviso: "Peça sem data de chegada conta como pendente, porque não dá para provar que chegou no dia. O dia da referência vem do relatório atualizado (veja a referência no topo).",
     acao: "Cobre o entregador pela entrega ou reprograme a rota.",

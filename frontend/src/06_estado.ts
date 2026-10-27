@@ -121,30 +121,41 @@ type AbaPend = AcaoPend | "justificados";
 const tentativasDe = (r: RegAtual) => Number(r.dados["Delivery Count"]) || 0;
 
 // Regra de pendência (alinhada com a operação em 24/10/2026). É pendência:
-//   · toda peça de Unaí, qualquer que seja a data de chegada;
+//   · toda peça de uma cidade sem prazo (por padrão Unaí; configurável), qualquer que seja a data de chegada;
 //   · nas demais cidades, a peça que chegou ANTES do dia da referência (prazo de um dia vencido).
 // Não é pendência: peça das demais cidades que chegou no mesmo dia da referência; peça com entrega confirmada;
 // peça com tentativa de entrega registrada no dia da referência (ela vai para as listas de tentativas).
 // Sem data de chegada: conta como pendência, porque não dá para provar que chegou hoje.
-const CIDADE_SEM_PRAZO = "unai";
+// A lista de cidades sem prazo é configurável em Regras de abrangência (E.overrides.cidades_sem_prazo). Nunca definida: vale o
+// padrão, Unaí. Lista vazia é uma escolha (nenhuma cidade com exceção).
+const CIDADES_SEM_PRAZO_PADRAO = ["Unaí"];
+const cidadesSemPrazo = (): string[] => E.overrides.cidades_sem_prazo ?? CIDADES_SEM_PRAZO_PADRAO;
+const chaveCidade = (c: unknown) => normalizarBusca(String(c ?? ""));
+let semPrazoEmCache: { lista: string[]; chaves: Set<string> } | null = null; // a lista só muda ao salvar: não normaliza a cada peça
+function chavesSemPrazo(lista: string[] = cidadesSemPrazo()): Set<string> {
+  if (!semPrazoEmCache || semPrazoEmCache.lista !== lista) semPrazoEmCache = { lista, chaves: new Set(lista.map(chaveCidade)) };
+  return semPrazoEmCache.chaves;
+}
+const nomesJuntos = (l: string[]) => (l.length < 2 ? l.join("") : l.slice(0, -1).join(", ") + " e " + l[l.length - 1]);
 const refDiaAnalise = () => (E.analise ? E.analise.referencia_backlog.slice(0, 10) : "");
-const ehCidadeSemPrazo = (r: RegAtual) => normalizarBusca(String(r.dados["Consignee City"] ?? "")) === CIDADE_SEM_PRAZO;
+const ehCidadeSemPrazo = (r: RegAtual, chaves: Set<string> = chavesSemPrazo()) => chaves.has(chaveCidade(r.dados["Consignee City"]));
 function tentativaNoDia(r: RegAtual, refDia: string): boolean {
   if (tentativasDe(r) < 1) return false;
   const dt = paraData(r.dados["Last Problem Date"]);
   return !!dt && diaIso(dt) === refDia;
 }
 // Por que a peça é (ou não) pendência: o texto serve à tela e à gaveta da encomenda.
-function motivoPendencia(r: RegAtual, refDia = refDiaAnalise()): { pendente: boolean; motivo: string } {
+function motivoPendencia(r: RegAtual, refDia = refDiaAnalise(), chaves: Set<string> = chavesSemPrazo()): { pendente: boolean; motivo: string } {
   if (r.entrega_confirmada) return { pendente: false, motivo: "Entrega confirmada no relatório." };
   if (tentativaNoDia(r, refDia)) return { pendente: false, motivo: "Teve tentativa de entrega no dia da referência: sai da lista de pendentes e aparece nas listas de tentativas." };
-  if (ehCidadeSemPrazo(r)) return { pendente: true, motivo: "Peça de Unaí: é pendência qualquer que seja a data de chegada." };
+  const cidade = String(r.dados["Consignee City"] ?? "").trim() || "a cidade";
+  if (ehCidadeSemPrazo(r, chaves)) return { pendente: true, motivo: `Peça de ${cidade}: é pendência qualquer que seja a data de chegada (cidade sem prazo, em Regras de abrangência).` };
   const dia = diaChegada(r);
   if (dia === SEM_DATA) return { pendente: true, motivo: "Sem data de chegada: não dá para provar que chegou hoje, então conta como pendência." };
   if (dia < refDia) return { pendente: true, motivo: `Chegou em ${fmtDia(dia)}, antes do dia da referência (${fmtDia(refDia)}): o prazo de um dia já venceu.` };
-  return { pendente: false, motivo: `Chegou no dia da referência (${fmtDia(refDia)}) e não é de Unaí: ainda está dentro do prazo.` };
+  return { pendente: false, motivo: `Chegou no dia da referência (${fmtDia(refDia)}) e ${cidade} tem prazo de um dia: ainda está dentro do prazo.` };
 }
-const ehPendencia = (r: RegAtual, refDia = refDiaAnalise()) => motivoPendencia(r, refDia).pendente;
+const ehPendencia = (r: RegAtual, refDia = refDiaAnalise(), chaves: Set<string> = chavesSemPrazo()) => motivoPendencia(r, refDia, chaves).pendente;
 
 // 1 e 2 tentativas listam TODA peça com essa quantidade de tentativas e problema (inclusive a que já saiu para rota de novo,
 // que aparece com a marca "já em rota"). Só pede ação sua a que ainda não saiu: ver `pedeAcao`.

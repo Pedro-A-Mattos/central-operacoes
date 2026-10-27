@@ -2,5 +2,8 @@
   "por_cidade": {},
   "cidades_ignoradas": [
     "Arinos"
+  ],
+  "cidades_sem_prazo": [
+    "Unaí"
   ]
 }

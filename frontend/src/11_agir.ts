@@ -119,7 +119,7 @@ function roteiroPiso(lista: RegAtual[]): HTMLElement {
 
 // ---------- Pendências de entrega ----------
 const REGRA_PEND: Record<Exclude<AbaPend, "justificados">, Filho> = {
-  atrasadas: "Regra de pendência: toda peça de Unaí, qualquer que seja a data de chegada, e as das demais cidades que chegaram antes do dia da referência. Peça de outra cidade que chegou no dia da referência, com entrega confirmada ou com tentativa de entrega no dia não entra (as com tentativa estão nas listas de tentativas).",
+  atrasadas: "", // montada por regraPendentes(): depende das cidades sem prazo configuradas
   tent1: "Peças com ocorrência e exatamente 1 tentativa de entrega. As que já saíram para rota depois da ocorrência aparecem marcadas “já em rota” e não contam nos alertas. Ação nas demais: colocar em rota de novo. O entregador precisa avisar se já está em rota.",
   tent2: "Peças com ocorrência e exatamente 2 tentativas. As que já saíram para rota depois da ocorrência aparecem marcadas “já em rota” e não contam nos alertas. Ação nas demais: colocar em rota de novo e verificar com o entregador se vai devolver a peça.",
   tent3: "3 ou mais tentativas: realizar o processo de devolução. Quando o último motivo não é ausência nem recusa (ex.: reprogramação a pedido do cliente), a peça aparece como “confirmar” antes de devolver.",
@@ -127,6 +127,13 @@ const REGRA_PEND: Record<Exclude<AbaPend, "justificados">, Filho> = {
   avaria: "O tipo ou o motivo do problema contém “avaria” ou “danific”, e não é extravio. Não é tentativa de entrega: a peça pode nem ter saído do galpão. Ação: seguir o processo de avaria (sinalizar o piso e pedir aprovação). O relatório não traz o horário de deslacre do caminhão, então os prazos de 4 h (iMile) e 2 h (Anjun) não são medidos aqui.",
   ja_em_rota: "Tinham ocorrência, mas a saída para entrega é POSTERIOR a ela: já foram colocadas em rota de novo. Saem das listas de ação; esta aba serve para conferir.",
 };
+// "Pendentes": o texto cita as cidades sem prazo que estiverem configuradas (padrão: Unaí).
+function regraPendentes(): string {
+  const l = cidadesSemPrazo();
+  return (l.length ? `Regra de pendência: toda peça de ${nomesJuntos(l)}, qualquer que seja a data de chegada, e as das demais cidades que chegaram antes do dia da referência.`
+    : "Regra de pendência: toda peça que chegou antes do dia da referência (nenhuma cidade tem exceção de prazo).")
+    + " Peça que chegou no dia da referência (fora das cidades sem prazo), com entrega confirmada ou com tentativa de entrega no dia não entra (as com tentativa estão nas listas de tentativas).";
+}
 const ACAO_PEND: Record<Exclude<AbaPend, "justificados">, string> = {
   atrasadas: "Cobrar a entrega", tent1: "Colocar em rota", tent2: "Colocar em rota e ver devolução", tent3: "Iniciar devolução",
   extravio: "Investigar extravio", avaria: "Seguir o processo de avaria", ja_em_rota: "Conferir se está em rota",
@@ -249,7 +256,7 @@ function telaExcecoes(): HTMLElement {
     ], f.aba, (v) => set(() => { f.aba = v; MARCADOS_EXC.clear(); E.f.pivotEntrega.cel = null; })),
     h("p", { class: "regra" }, explica(f.aba, "aba"), f.aba === "justificados"
       ? ["Alertas silenciados com motivo. Reative para que voltem às listas ativas.", outrasJust ? ` Há ${plural(outrasJust, "outra justificativa guardada", "outras justificativas guardadas")} para encomendas que não estão em alerta nesta análise.` : ""]
-      : REGRA_PEND[f.aba]),
+      : f.aba === "atrasadas" ? regraPendentes() : REGRA_PEND[f.aba]),
     base.length ? barraFiltros([
       multi({ id: "x-cid", rotulo: "Cidade", opcoes: unicos(base.map((r) => r.dados["Consignee City"] as string)), valores: f.cidades, onMudar: (v) => set(() => { f.cidades = v; }) }),
       multi({ id: "x-bai", rotulo: "Bairro", opcoes: unicos(base.filter((r) => !f.cidades.length || f.cidades.includes(String(r.dados["Consignee City"]))).map((r) => r.dados["Consignee Area"] as string)), valores: f.bairros, onMudar: (v) => set(() => { f.bairros = v; }), descricao: "Combina com a cidade." }),

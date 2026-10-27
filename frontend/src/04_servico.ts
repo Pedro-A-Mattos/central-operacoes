@@ -104,7 +104,7 @@ interface Repositorio {
   gravarImportacao(r: RegistroImportacao): Promise<RegistroImportacao[]>;
 }
 
-const OV_VAZIO = (): Overrides => ({ por_cidade: {}, cidades_ignoradas: [] });
+const OV_VAZIO = (): Overrides => ({ por_cidade: {}, cidades_ignoradas: [], cidades_sem_prazo: null });
 
 // Modo efêmero (build --publico): nada é gravado em lugar nenhum. Tudo vive só
 // nesta aba e some ao fechar/recarregar. Sem localStorage para dados, sem servidor, sem custo (preferências de tela: 06d_prefs.ts).
@@ -133,7 +133,8 @@ async function lerRegrasPublicadas(): Promise<Overrides | null> {
     const v = await r.json();
     if (!v || typeof v !== "object") return null;
     return { por_cidade: (v.por_cidade && typeof v.por_cidade === "object") ? v.por_cidade : {},
-             cidades_ignoradas: Array.isArray(v.cidades_ignoradas) ? v.cidades_ignoradas : [] };
+             cidades_ignoradas: Array.isArray(v.cidades_ignoradas) ? v.cidades_ignoradas : [],
+             cidades_sem_prazo: Array.isArray(v.cidades_sem_prazo) ? v.cidades_sem_prazo : null };
   } catch { return null; }
 }
 
@@ -189,7 +190,7 @@ async function repoArtefato(): Promise<Repositorio | null> {
     async lerRegras() {
       const s = await db.doc("config/regras_piso").get();
       const v = s.exists ? s.data() : null;
-      return v ? { por_cidade: v.por_cidade || {}, cidades_ignoradas: v.cidades_ignoradas || [] } : OV_VAZIO();
+      return v ? { por_cidade: v.por_cidade || {}, cidades_ignoradas: v.cidades_ignoradas || [], cidades_sem_prazo: Array.isArray(v.cidades_sem_prazo) ? v.cidades_sem_prazo : null } : OV_VAZIO();
     },
     async gravarRegras(ov) { await db.doc("config/regras_piso").set(ov as any); },
     lerHistorico: lerHistoricoDb,
@@ -247,7 +248,7 @@ class ServicoLocal implements Servico {
   async desempenho(dias: string[]) { if (!this.ctx) throw new ErroServico(problemaDe(null)); return desempenhoLocal(this.ctx.baseF, this.ctx.ultF, dias); }
   obterRegras() { return this.repo.lerRegras(); }
   async salvarRegras(ov: Overrides) {
-    const limpo: Overrides = { por_cidade: {}, cidades_ignoradas: [...new Set(ov.cidades_ignoradas)].sort() };
+    const limpo: Overrides = { por_cidade: {}, cidades_ignoradas: [...new Set(ov.cidades_ignoradas)].sort(), cidades_sem_prazo: Array.isArray(ov.cidades_sem_prazo) ? [...new Set(ov.cidades_sem_prazo)].sort() : null };
     for (const [c, e] of Object.entries(ov.por_cidade)) limpo.por_cidade[c] = [...new Set(e)].sort();
     await this.repo.gravarRegras(limpo); return limpo;
   }

@@ -96,7 +96,7 @@ function telaFora(): HTMLElement {
 }
 
 // ---------- Regras de abrangência ----------
-const EDIT = { cidade: "", sel: [] as string[], limiar: 0, ignoradas: null as string[] | null, salvando: false };
+const EDIT = { cidade: "", sel: [] as string[], limiar: 0, ignoradas: null as string[] | null, semPrazo: null as string[] | null, salvando: false };
 
 // Simulação: mostra o impacto na conferência de piso ANTES de salvar.
 const IMPACTO = { chave: "", carregando: false, res: null as Simulacao | null, erro: "", timer: 0 as unknown as ReturnType<typeof setTimeout> };
@@ -139,12 +139,26 @@ async function salvarOverrides(ov: Overrides, msg: string) {
   finally { EDIT.salvando = false; renderizar(); }
 }
 
+// Cidades sem prazo: é regra da tela (não do motor), então salva sem reprocessar a análise.
+async function salvarSemPrazo(lista: string[]) {
+  EDIT.salvando = true; renderizar();
+  try {
+    E.overrides = await E.servico!.salvarRegras({ ...E.overrides, cidades_sem_prazo: lista });
+    EDIT.semPrazo = null; aviso("Cidades sem prazo atualizadas.");
+  } catch (e) { aviso(problemaDe(e).titulo, "erro"); }
+  finally { EDIT.salvando = false; renderizar(); }
+}
+
 function telaRegras(): HTMLElement {
   const a = E.analise!;
   const cidades = Object.keys(a.regras.por_cidade);
   const todosEnt = unicos([...E.desempenho!.linhas.map((l) => l.entregador).filter((x) => x !== "(sem entregador)"), ...a.atual.map((r) => r.dados["Delivery Associate"] as string)]);
   const ov = E.overrides;
   const ign = EDIT.ignoradas ?? ov.cidades_ignoradas;
+  const semPrazoAtual = cidadesSemPrazo();
+  const semPrazo = EDIT.semPrazo ?? semPrazoAtual;
+  // impacto da mudança, sem salvar: quantas peças são pendência com a lista nova e com a atual
+  const contarPend = (l: string[]) => { const ch = new Set(l.map(chaveCidade)), ref = refDiaAnalise(); return a.atual.filter((r) => ehPendencia(r, ref, ch)).length; };
   const limiar = EDIT.limiar || E.params.limiar_ruido;
 
   const linhas = cidades.map((c) => ({ cidade: c, ...a.regras.por_cidade[c] }));
@@ -178,6 +192,15 @@ function telaRegras(): HTMLElement {
         multi({ id: "rg-ign", rotulo: "Cidades ignoradas", opcoes: unicos([...cidades, ...ov.cidades_ignoradas]), valores: ign, onMudar: (v) => { EDIT.ignoradas = v; simularImpacto("ign", { ...cfgAtual(), overrides: { ...ov, cidades_ignoradas: v } }); } }),
         caixaImpacto("ign"),
         EDIT.ignoradas ? h("button", { type: "button", class: "btn btn-sec", disabled: EDIT.salvando, on: { click: () => salvarOverrides({ ...ov, cidades_ignoradas: EDIT.ignoradas! }, "Cidades ignoradas atualizadas.") } }, "Salvar e recalcular") : null)),
+    h("section", { class: "bloco" },
+      h("h2", { class: "fig-tit" }, "Cidades sem prazo de chegada", explica("cidades_sem_prazo", "rg")),
+      h("p", { class: "nota" }, "Nestas cidades toda peça é pendência, qualquer que seja a data de chegada. Nas demais, só quando chegou antes do dia da referência."),
+      multi({ id: "rg-sem-prazo", rotulo: "Cidades sem prazo", opcoes: unicos([...cidades, ...semPrazoAtual]), valores: semPrazo, onMudar: (v) => { EDIT.semPrazo = v; renderizar(); } }),
+      EDIT.semPrazo ? h("p", { class: "impacto com-mudanca", "aria-live": "polite" }, h("strong", null, "Se salvar: "),
+        `a lista Pendentes passa de ${fmtN(contarPend(semPrazoAtual))} para ${fmtN(contarPend(EDIT.semPrazo))} peças.`) : null,
+      EDIT.semPrazo ? h("div", { class: "editor-acoes" },
+        h("button", { type: "button", class: "btn btn-sec", disabled: EDIT.salvando, on: { click: () => salvarSemPrazo(EDIT.semPrazo!) } }, "Salvar"),
+        h("button", { type: "button", class: "btn btn-ghost", on: { click: () => atualizar(() => { EDIT.semPrazo = null; }) } }, "Cancelar")) : null),
     h("section", { class: "bloco" },
       h("div", { class: "bloco-cab" }, h("h2", null, "Regras por cidade"), h("span", { class: "resp-ajudas" }, h("span", { class: "fig-tit" }, "Regra derivada", explica("regra_derivada", "rg")), h("span", { class: "fig-tit" }, "Ajuste manual", explica("ajuste_manual", "rg")), h("span", { class: "fig-tit" }, "Conferida por bairro", explica("por_bairro", "rg")))),
       h("ul", { class: "regras-lista" }, linhas.map((l) => {

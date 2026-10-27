@@ -34,6 +34,7 @@ etapa "Regra de pendência e tentativas" node tests/pendencia.mjs
 etapa "Estado da tabela dinâmica entre telas" node tests/estado_pivot.mjs
 etapa "Preferências de tela" node tests/prefs.mjs
 etapa "Mensagem de cobrança por entregador" node tests/cobranca.mjs
+etapa "Cidades sem prazo configuráveis" node tests/semprazo.mjs
 etapa "Escrita de .xlsx (round-trip)" env SAIDA_XLSX="$TMP/saida.xlsx" node tests/escrita_xlsx.mjs
 etapa "Escrita de .xlsx (openpyxl e pandas)" "$PY" "$RAIZ/backend/tests/conferir_xlsx.py" "$TMP/saida.xlsx"
 

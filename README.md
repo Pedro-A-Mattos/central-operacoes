@@ -99,7 +99,7 @@ push — o site republica automaticamente.
 |---|---|---|
 | — | Torre de controle | Como está a operação e o que precisa da minha atenção? |
 | Agir agora | Conferência de piso | Alguma encomenda está com a cidade ou o entregador errado? (tabela ou roteiro por entregador) |
-| Agir agora | Pendências de entrega | O que preciso colocar em rota, cobrar ou devolver? (Pendentes: Unaí sempre, demais cidades se chegaram antes do dia da referência; 1, 2 e 3 tentativas; extravios; avarias) |
+| Agir agora | Pendências de entrega | O que preciso colocar em rota, cobrar ou devolver? (Pendentes: cidades sem prazo, por padrão Unaí, sempre; demais cidades se chegaram antes do dia da referência; 1, 2 e 3 tentativas, com mensagem pronta para o WhatsApp; extravios; avarias) |
 | Monitorar | Pendências | Quantas faltam, onde estão e há quanto tempo esperam? (tabela cidade × data de chegada, com entregador, bairro e endereço sob demanda) |
 | Monitorar | Entregadores | Como está cada entregador? Quantidade e %, por entregador ou por cidade e entregador (rosca de resumo, ritmo) |
 | Monitorar | Histórico | As pendências estão caindo? O que mudou entre importações? |
